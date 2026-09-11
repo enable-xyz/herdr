@@ -1,15 +1,6 @@
 use super::*;
 
 impl ClientShellState {
-    pub(super) fn active_endpoint_workspace_at(&self, point: (u16, u16)) -> Option<String> {
-        self.hits
-            .workspaces
-            .iter()
-            .find(|hit| {
-                hit.endpoint_id == self.active_endpoint_id && super::contains(hit.rect, point)
-            })
-            .map(|hit| hit.workspace_id.clone())
-    }
     pub(super) fn sidebar_action_target_at(
         &self,
         point: (u16, u16),

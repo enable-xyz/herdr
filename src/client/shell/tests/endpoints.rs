@@ -503,35 +503,6 @@ fn clicking_remote_endpoint_requests_activation_without_mutating_projection() {
 }
 
 #[test]
-fn context_menu_lookup_ignores_inactive_endpoint_workspaces() {
-    let (mut state, endpoint_id) = state_with_remote();
-    state.compose(100, 28).expect("combined endpoint frame");
-    let remote = state
-        .hits
-        .workspaces
-        .iter()
-        .find(|hit| hit.endpoint_id == endpoint_id)
-        .expect("remote workspace")
-        .rect;
-    let local = state
-        .hits
-        .workspaces
-        .iter()
-        .find(|hit| hit.endpoint_id.is_local())
-        .expect("local workspace")
-        .rect;
-
-    assert_eq!(
-        state.active_endpoint_workspace_at((remote.x, remote.y)),
-        None
-    );
-    assert_eq!(
-        state.active_endpoint_workspace_at((local.x, local.y)),
-        Some("ws_1".into())
-    );
-}
-
-#[test]
 fn future_surface_waits_for_its_exact_snapshot_revision() {
     let (mut state, _) = state_with_remote();
     let mut future = surface();

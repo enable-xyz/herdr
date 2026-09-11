@@ -7,7 +7,6 @@ impl ClientShellState {
         }
         if self.sidebar_collapsed != collapsed {
             self.sidebar_collapsed = collapsed;
-            self.reveal_navigation_workspace = true;
             self.invalidate_pane_surface();
             outcome.repaint = true;
             outcome.resize = true;
