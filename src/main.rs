@@ -188,6 +188,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # resize_pane_up = ""     # optional, e.g. "ctrl+shift+alt+up"
 # resize_pane_right = ""  # optional, e.g. "ctrl+shift+alt+right"
 # toggle_sidebar = "prefix+b"
+# hide_sidebar = ""      # optional, unset by default; bind e.g. "ctrl+1"
+# show_sidebar = ""      # optional, unset by default; bind e.g. "ctrl+2"
 
 # Navigate-mode movement. These local shortcuts win while navigate mode is open.
 # They are independent from focus_pane_*. Do not include prefix+, esc, enter, tab, or 1..9 here.
@@ -242,6 +244,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
+# Optional qualified plugin action invoked by double-clicking a workspace or agent row
+# and exposed in those rows' right-click menus. Empty disables both gestures.
+# workspace_open_action = ""
+# workspace_open_action_title = "Open in new window"
+
 
 # Terminal width at or below which Herdr uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.

@@ -10,6 +10,162 @@ impl ClientShellState {
             })
             .map(|hit| hit.workspace_id.clone())
     }
+    pub(super) fn sidebar_action_target_at(
+        &self,
+        point: (u16, u16),
+    ) -> Option<ClientSidebarActionTarget> {
+        if let Some((_, endpoint_id, pane_id)) = self
+            .hits
+            .endpoint_agents
+            .iter()
+            .find(|(rect, _, _)| super::contains(*rect, point))
+        {
+            let workspace_id = self
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.endpoint_id == *endpoint_id)?
+                .snapshot
+                .as_deref()?
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == *pane_id)?
+                .workspace_id
+                .clone();
+            return Some(ClientSidebarActionTarget {
+                endpoint_id: endpoint_id.clone(),
+                workspace_id,
+                pane_id: Some(pane_id.clone()),
+            });
+        }
+        if let Some((_, pane_id)) = self
+            .hits
+            .agents
+            .iter()
+            .find(|(rect, _)| super::contains(*rect, point))
+        {
+            let workspace_id = self
+                .snapshot
+                .as_deref()?
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == *pane_id)?
+                .workspace_id
+                .clone();
+            return Some(ClientSidebarActionTarget {
+                endpoint_id: self.active_endpoint_id.clone(),
+                workspace_id,
+                pane_id: Some(pane_id.clone()),
+            });
+        }
+        self.hits
+            .workspaces
+            .iter()
+            .find(|hit| super::contains(hit.rect, point))
+            .map(|hit| ClientSidebarActionTarget {
+                endpoint_id: hit.endpoint_id.clone(),
+                workspace_id: hit.workspace_id.clone(),
+                pane_id: None,
+            })
+    }
+
+    pub(super) fn invoke_sidebar_workspace_action(
+        &mut self,
+        target: ClientSidebarActionTarget,
+        outcome: &mut ClientShellInput,
+    ) -> bool {
+        let Some(action_id) = self.config.workspace_open_action.clone() else {
+            return false;
+        };
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == target.endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
+            return false;
+        };
+        let Some(workspace) = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_id == target.workspace_id)
+        else {
+            return false;
+        };
+        let pane = target
+            .pane_id
+            .as_ref()
+            .and_then(|pane_id| snapshot.panes.iter().find(|pane| pane.pane_id == *pane_id));
+        let agent = target.pane_id.as_ref().and_then(|pane_id| {
+            snapshot
+                .agents
+                .iter()
+                .find(|agent| agent.pane_id == *pane_id)
+        });
+        let context = crate::api::schema::PluginInvocationContext {
+            workspace_id: Some(workspace.workspace_id.clone()),
+            workspace_label: Some(workspace.label.clone()),
+            workspace_cwd: Some(workspace.new_workspace_cwd.clone()),
+            worktree: None,
+            tab_id: pane.map(|pane| pane.tab_id.clone()),
+            tab_label: pane.and_then(|pane| {
+                snapshot
+                    .tabs
+                    .iter()
+                    .find(|tab| tab.tab_id == pane.tab_id)
+                    .map(|tab| tab.label.clone())
+            }),
+            focused_pane_id: target.pane_id.clone(),
+            focused_pane_cwd: pane.and_then(|pane| pane.cwd.clone()),
+            focused_pane_agent: agent.and_then(|agent| agent.agent.clone()),
+            focused_pane_status: agent.map(|agent| agent.agent_status),
+            selected_text: None,
+            invocation_source: Some("sidebar".into()),
+            correlation_id: None,
+            clicked_url: None,
+            link_handler_id: None,
+        };
+        self.push_endpoint_method_for(
+            target.endpoint_id,
+            crate::api::schema::Method::PluginActionInvoke(
+                crate::api::schema::PluginActionInvokeParams {
+                    action_id,
+                    plugin_id: None,
+                    context: Some(context),
+                },
+            ),
+            PendingEndpointKind::Generic,
+            outcome,
+        )
+    }
+
+    pub(super) fn record_sidebar_action_click(
+        &mut self,
+        target: ClientSidebarActionTarget,
+        now: std::time::Instant,
+        outcome: &mut ClientShellInput,
+    ) {
+        if self.config.workspace_open_action.is_none() {
+            self.last_sidebar_action_click = None;
+            return;
+        }
+        const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(350);
+        let invoke = self
+            .last_sidebar_action_click
+            .as_ref()
+            .is_some_and(|previous| {
+                previous.target == target
+                    && !previous.invoked
+                    && now.saturating_duration_since(previous.at) <= DOUBLE_CLICK
+            });
+        if invoke {
+            self.invoke_sidebar_workspace_action(target.clone(), outcome);
+        }
+        self.last_sidebar_action_click = Some(ClientSidebarActionClick {
+            target,
+            at: now,
+            invoked: invoke,
+        });
+    }
 
     pub(super) fn endpoint_workspace_is_draggable(&self, press: &ClientWorkspacePress) -> bool {
         press.endpoint_id == self.active_endpoint_id

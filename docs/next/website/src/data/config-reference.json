@@ -830,6 +830,18 @@
           "description": "Toggle sidebar collapse."
         },
         {
+          "key": "keys.hide_sidebar",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Collapse the sidebar. Unset by default."
+        },
+        {
+          "key": "keys.show_sidebar",
+          "type": "keybinding",
+          "default": "unset",
+          "description": "Expand the sidebar. Unset by default."
+        },
+        {
           "key": "keys.indexed.tabs",
           "type": "string",
           "default": "unset",
@@ -886,6 +898,18 @@
             "compact",
             "hidden"
           ]
+        },
+        {
+          "key": "ui.workspace_open_action",
+          "type": "string",
+          "default": "unset",
+          "description": "Qualified plugin action invoked by double-clicking a workspace or agent row and shown in those rows' context menus. Unset disables the gestures."
+        },
+        {
+          "key": "ui.workspace_open_action_title",
+          "type": "string",
+          "default": "\"Open in new window\"",
+          "description": "Context-menu label for ui.workspace_open_action."
         },
         {
           "key": "ui.mobile_width_threshold",

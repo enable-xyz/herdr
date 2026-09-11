@@ -930,6 +930,7 @@ impl ClientShellState {
             return;
         }
         if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
+            self.last_sidebar_action_click = None;
             match self.chrome_drag.as_ref() {
                 Some(ClientChromeDrag::SidebarWidth) => {
                     self.set_sidebar_width_from_column(mouse.column, outcome);
@@ -1262,7 +1263,13 @@ impl ClientShellState {
                 return;
             }
             if let Some(press) = self.workspace_press.take() {
+                let target = ClientSidebarActionTarget {
+                    endpoint_id: press.endpoint_id.clone(),
+                    workspace_id: press.workspace_id.clone(),
+                    pane_id: None,
+                };
                 self.finish_endpoint_workspace_press(press, outcome);
+                self.record_sidebar_action_click(target, std::time::Instant::now(), outcome);
                 return;
             }
             if let Some(press) = self.tab_press.take() {
@@ -1718,12 +1725,18 @@ impl ClientShellState {
                 if !self.config.mouse_capture {
                     return;
                 }
-                let workspace_id = (!self.sidebar_collapsed)
-                    .then(|| self.active_endpoint_workspace_at(point))
-                    .flatten();
-                if let Some(workspace_id) = workspace_id {
-                    self.open_workspace_context_menu(workspace_id, mouse.column, mouse.row);
-                    outcome.repaint = true;
+                if let Some(target) = self.sidebar_action_target_at(point) {
+                    if target.pane_id.is_some() || target.endpoint_id != self.active_endpoint_id {
+                        self.open_agent_context_menu(target, mouse.column, mouse.row);
+                    } else {
+                        self.open_workspace_context_menu(
+                            target.endpoint_id,
+                            target.workspace_id,
+                            mouse.column,
+                            mouse.row,
+                        );
+                    }
+                    outcome.repaint = self.overlay.is_some();
                     return;
                 }
                 let tab_id = self
@@ -2027,22 +2040,19 @@ impl ClientShellState {
                     self.tab_press = Some(tab_press);
                     return;
                 }
-                if self.handle_endpoint_agent_click(point, outcome) {
-                    return;
-                }
-                let agent_pane_id = self
-                    .hits
-                    .agents
-                    .iter()
-                    .find(|(rect, _)| super::contains(*rect, point))
-                    .map(|(_, pane_id)| pane_id.clone());
-                if let Some(pane_id) = agent_pane_id {
-                    self.push_endpoint_method(
-                        crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
-                            pane_id,
-                        }),
-                        outcome,
-                    );
+                if let Some(target) = self.sidebar_action_target_at(point) {
+                    let handled = self.handle_endpoint_agent_click(point, outcome);
+                    if !handled {
+                        if let Some(pane_id) = target.pane_id.clone() {
+                            self.push_endpoint_method(
+                                crate::api::schema::Method::PaneFocus(
+                                    crate::api::schema::PaneTarget { pane_id },
+                                ),
+                                outcome,
+                            );
+                        }
+                    }
+                    self.record_sidebar_action_click(target, std::time::Instant::now(), outcome);
                     return;
                 }
                 let scrollbar_hit = self

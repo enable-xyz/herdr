@@ -60,6 +60,8 @@ pub(crate) enum KeybindAction {
     ResizePaneUp,
     ResizePaneRight,
     ToggleSidebar,
+    HideSidebar,
+    ShowSidebar,
     CyclePaneNext,
     CyclePanePrevious,
     LastPane,
@@ -145,6 +147,8 @@ pub(crate) fn resolve_non_indexed_action(
         (&keybinds.resize_pane_up, KeybindAction::ResizePaneUp),
         (&keybinds.resize_pane_right, KeybindAction::ResizePaneRight),
         (&keybinds.toggle_sidebar, KeybindAction::ToggleSidebar),
+        (&keybinds.hide_sidebar, KeybindAction::HideSidebar),
+        (&keybinds.show_sidebar, KeybindAction::ShowSidebar),
         (&keybinds.reload_config, KeybindAction::ReloadConfig),
         (
             &keybinds.open_notification_target,

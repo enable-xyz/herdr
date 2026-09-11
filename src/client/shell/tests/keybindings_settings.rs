@@ -188,6 +188,68 @@ detach = "prefix+x"
 }
 
 #[test]
+fn explicit_sidebar_actions_are_idempotent_and_window_local() {
+    let new_state = || {
+        let config = toml::from_str::<Config>(
+            r#"
+[keys]
+hide_sidebar = "ctrl+1"
+show_sidebar = "ctrl+2"
+
+[ui]
+sidebar_collapsed_mode = "hidden"
+"#,
+        )
+        .expect("sidebar keybinds");
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state
+    };
+    let mut first = new_state();
+    let mut second = new_state();
+
+    first.compose(106, 20).expect("first expanded frame");
+
+    second.compose(106, 20).expect("second expanded frame");
+    let expanded_x = first.hits.panes[0].rect.x;
+    assert!(expanded_x > 0);
+    assert_eq!(second.hits.panes[0].rect.x, expanded_x);
+
+    for _ in 0..2 {
+        first.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            KeyCode::Char('1'),
+            KeyModifiers::CONTROL,
+        ))]);
+        first.set_pane_surface(surface());
+        first.compose(106, 20).expect("hidden sidebar frame");
+        assert_eq!(first.hits.panes[0].rect.x, 0);
+        assert_eq!(second.hits.panes[0].rect.x, expanded_x);
+    }
+
+    for _ in 0..2 {
+        first.handle_raw_events(vec![RawInputEvent::Key(crate::input::TerminalKey::new(
+            KeyCode::Char('2'),
+            KeyModifiers::CONTROL,
+        ))]);
+        first.set_pane_surface(surface());
+        first.compose(106, 20).expect("shown sidebar frame");
+        assert_eq!(first.hits.panes[0].rect.x, expanded_x);
+        assert_eq!(second.hits.panes[0].rect.x, expanded_x);
+    }
+
+    for expected_x in [0, expanded_x] {
+        first.record_binding(
+            crate::input::KeybindMatch::Action(crate::input::KeybindAction::ToggleSidebar),
+            &mut ClientShellInput::default(),
+        );
+        first.set_pane_surface(surface());
+        first.compose(106, 20).expect("toggled sidebar frame");
+        assert_eq!(first.hits.panes[0].rect.x, expected_x);
+    }
+}
+
+#[test]
 fn prefix_endpoint_action_uses_public_api_with_stable_ids() {
     let mut config = Config::default();
     config.ui.prompt_new_tab_name = false;

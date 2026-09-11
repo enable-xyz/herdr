@@ -4,8 +4,11 @@ impl ClientContextMenuOverlay {
     pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
-        let item = |label, action| ClientContextMenuItem { label, action };
-        match &self.target {
+        let item = |label: &str, action| ClientContextMenuItem {
+            label: label.to_owned(),
+            action,
+        };
+        let mut items = match &self.target {
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
             }
@@ -41,6 +44,7 @@ impl ClientContextMenuOverlay {
                     Action::ToggleGroup,
                 ),
             ],
+            ClientContextMenuTarget::SidebarAction(_) => Vec::new(),
             ClientContextMenuTarget::Tab { .. } => vec![
                 item("New tab", Action::NewTab),
                 item("Rename", Action::Rename),
@@ -75,13 +79,33 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+        };
+        if matches!(
+            &self.target,
+            ClientContextMenuTarget::Workspace { .. } | ClientContextMenuTarget::SidebarAction(_)
+        ) {
+            if let Some(label) = self.sidebar_action_label.as_deref() {
+                items.insert(0, item(label, Action::OpenWorkspaceAction));
+            }
         }
+        items
     }
 }
 
 impl ClientShellState {
-    pub(super) fn open_workspace_context_menu(&mut self, workspace_id: String, x: u16, y: u16) {
-        let Some(snapshot) = self.snapshot.as_deref() else {
+    pub(super) fn open_workspace_context_menu(
+        &mut self,
+        endpoint_id: ClientEndpointId,
+        workspace_id: String,
+        x: u16,
+        y: u16,
+    ) {
+        let Some(snapshot) = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .and_then(|endpoint| endpoint.snapshot.as_deref())
+        else {
             return;
         };
         let Some(workspace) = snapshot
@@ -110,6 +134,7 @@ impl ClientShellState {
             worktree.is_some_and(|worktree| self.collapsed_groups.contains(&worktree.key));
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::Workspace {
+                endpoint_id,
                 workspace_id,
                 is_git: worktree.is_some() || workspace.branch.is_some(),
                 is_linked_worktree: worktree.is_some_and(|worktree| worktree.is_linked_worktree),
@@ -118,6 +143,29 @@ impl ClientShellState {
             },
             x,
             y,
+            sidebar_action_label: self
+                .config
+                .workspace_open_action
+                .as_ref()
+                .map(|_| self.config.workspace_open_action_title.clone()),
+            highlighted: 0,
+        }));
+    }
+
+    pub(super) fn open_agent_context_menu(
+        &mut self,
+        target: ClientSidebarActionTarget,
+        x: u16,
+        y: u16,
+    ) {
+        if self.config.workspace_open_action.is_none() {
+            return;
+        }
+        self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::SidebarAction(target),
+            x,
+            y,
+            sidebar_action_label: Some(self.config.workspace_open_action_title.clone()),
             highlighted: 0,
         }));
     }
@@ -137,6 +185,7 @@ impl ClientShellState {
             },
             x,
             y,
+            sidebar_action_label: None,
             highlighted: 0,
         }));
     }
@@ -162,6 +211,7 @@ impl ClientShellState {
             },
             x,
             y,
+            sidebar_action_label: None,
             highlighted: 0,
         }));
     }
@@ -191,8 +241,15 @@ impl ClientShellState {
             return;
         };
         match menu.target {
-            ClientContextMenuTarget::Workspace { workspace_id, .. } => {
-                self.activate_workspace_context_action(workspace_id, action, outcome)
+            ClientContextMenuTarget::Workspace {
+                endpoint_id,
+                workspace_id,
+                ..
+            } => self.activate_workspace_context_action(endpoint_id, workspace_id, action, outcome),
+            ClientContextMenuTarget::SidebarAction(target) => {
+                if action == ClientContextMenuAction::OpenWorkspaceAction {
+                    self.invoke_sidebar_workspace_action(target, outcome);
+                }
             }
             ClientContextMenuTarget::Tab {
                 tab_id,
@@ -218,6 +275,7 @@ impl ClientShellState {
 
     fn activate_workspace_context_action(
         &mut self,
+        endpoint_id: ClientEndpointId,
         workspace_id: String,
         action: ClientContextMenuAction,
         outcome: &mut ClientShellInput,
@@ -225,6 +283,16 @@ impl ClientShellState {
         use crate::input::KeybindAction;
 
         match action {
+            ClientContextMenuAction::OpenWorkspaceAction => {
+                self.invoke_sidebar_workspace_action(
+                    ClientSidebarActionTarget {
+                        endpoint_id,
+                        workspace_id,
+                        pane_id: None,
+                    },
+                    outcome,
+                );
+            }
             ClientContextMenuAction::Rename => {
                 let label = self
                     .snapshot

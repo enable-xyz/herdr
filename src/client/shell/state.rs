@@ -74,6 +74,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) sidebar_max_width: u16,
     pub(super) sidebar_start_collapsed: bool,
     pub(super) sidebar_collapsed_mode: SidebarCollapsedModeConfig,
+    pub(super) workspace_open_action: Option<String>,
+    pub(super) workspace_open_action_title: String,
     pub(super) mobile_width_threshold: u16,
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
@@ -231,6 +233,19 @@ pub(super) struct ClientWorkspacePress {
     pub(super) workspace_id: String,
     pub(super) start_column: u16,
     pub(super) start_row: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ClientSidebarActionTarget {
+    pub(super) endpoint_id: ClientEndpointId,
+    pub(super) workspace_id: String,
+    pub(super) pane_id: Option<String>,
+}
+
+pub(super) struct ClientSidebarActionClick {
+    pub(super) target: ClientSidebarActionTarget,
+    pub(super) at: std::time::Instant,
+    pub(super) invoked: bool,
 }
 
 pub(super) struct ClientTabPress {
@@ -566,6 +581,7 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
+    OpenWorkspaceAction,
     Rename,
     Close,
     NewWorktree,
@@ -586,12 +602,14 @@ pub(super) enum ClientContextMenuAction {
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
     Workspace {
+        endpoint_id: ClientEndpointId,
         workspace_id: String,
         is_git: bool,
         is_linked_worktree: bool,
         has_worktree_children: bool,
         collapsed: bool,
     },
+    SidebarAction(ClientSidebarActionTarget),
     Tab {
         tab_id: String,
         workspace_id: String,
@@ -609,12 +627,13 @@ pub(super) enum ClientContextMenuTarget {
 pub(super) struct ClientContextMenuOverlay {
     pub(super) target: ClientContextMenuTarget,
     pub(super) x: u16,
+    pub(super) sidebar_action_label: Option<String>,
     pub(super) y: u16,
     pub(super) highlighted: usize,
 }
 
 pub(super) struct ClientContextMenuItem {
-    pub(super) label: &'static str,
+    pub(super) label: String,
     pub(super) action: ClientContextMenuAction,
 }
 
@@ -721,6 +740,7 @@ pub(super) enum PendingEndpointKind {
 }
 
 pub(super) struct PendingEndpointRequest {
+    pub(super) endpoint_id: ClientEndpointId,
     pub(super) boot_id: String,
     pub(super) method_name: String,
     pub(super) confirmation_workspace_id: Option<String>,
@@ -909,6 +929,7 @@ pub(crate) struct ClientShellState {
     pub(super) last_sidebar_divider_click: Option<std::time::Instant>,
     pub(super) chrome_drag: Option<ClientChromeDrag>,
     pub(super) workspace_press: Option<ClientWorkspacePress>,
+    pub(super) last_sidebar_action_click: Option<ClientSidebarActionClick>,
     pub(super) tab_press: Option<ClientTabPress>,
     pub(super) collapsed_groups: HashSet<String>,
     pub(super) workspace_scroll: usize,
@@ -1052,6 +1073,7 @@ impl ClientShellState {
             last_sidebar_divider_click: None,
             chrome_drag: None,
             workspace_press: None,
+            last_sidebar_action_click: None,
             tab_press: None,
             collapsed_groups: preferences.collapsed_groups.into_iter().collect(),
             workspace_scroll: 0,
@@ -1197,6 +1219,7 @@ impl ClientShellState {
         self.popup_terminal_id = None;
         self.chrome_drag = None;
         self.workspace_press = None;
+        self.last_sidebar_action_click = None;
         self.tab_press = None;
         self.workspace_scroll = 0;
         self.agent_scroll = 0;

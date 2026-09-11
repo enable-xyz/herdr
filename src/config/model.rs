@@ -450,6 +450,10 @@ pub struct KeysConfig {
     pub resize_pane_right: BindingConfig,
     /// Toggle sidebar collapse. Default: "prefix+b"
     pub toggle_sidebar: BindingConfig,
+    /// Collapse the sidebar. Unset by default.
+    pub hide_sidebar: BindingConfig,
+    /// Expand the sidebar. Unset by default.
+    pub show_sidebar: BindingConfig,
     /// Optional indexed shortcuts expanded over number keys 1-9.
     pub indexed: IndexedKeysConfig,
     /// Prefix-mode custom command bindings.
@@ -581,6 +585,10 @@ pub(crate) struct KeysConfigOverlay {
     #[serde(skip_serializing_if = "Option::is_none")]
     toggle_sidebar: Option<BindingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    hide_sidebar: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    show_sidebar: Option<BindingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     indexed: Option<IndexedKeysConfig>,
     #[serde(skip_serializing)]
     command: Option<Vec<CommandKeybindConfig>>,
@@ -668,6 +676,8 @@ impl<'de> Deserialize<'de> for KeysConfig {
         apply_field!(resize_pane_up);
         apply_field!(resize_pane_right);
         apply_field!(toggle_sidebar);
+        apply_field!(hide_sidebar);
+        apply_field!(show_sidebar);
         apply_field!(indexed);
         apply_field!(command);
 
@@ -772,6 +782,8 @@ impl KeysConfig {
         copy_effective_action_field!(resize_pane_up, keybinds.resize_pane_up);
         copy_effective_action_field!(resize_pane_right, keybinds.resize_pane_right);
         copy_effective_action_field!(toggle_sidebar, keybinds.toggle_sidebar);
+        copy_effective_action_field!(hide_sidebar, keybinds.hide_sidebar);
+        copy_effective_action_field!(show_sidebar, keybinds.show_sidebar);
         copy_user_field!(indexed);
 
         profile
@@ -910,6 +922,11 @@ pub struct UiConfig {
     pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
+    /// Qualified plugin action invoked from a sidebar workspace or agent row.
+    /// Empty disables sidebar open gestures. Default: empty.
+    pub workspace_open_action: String,
+    /// Label for the configured sidebar open action. Default: "Open in new window".
+    pub workspace_open_action_title: String,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
@@ -1140,6 +1157,8 @@ impl Default for KeysConfig {
             resize_pane_up: BindingConfig::empty(),
             resize_pane_right: BindingConfig::empty(),
             toggle_sidebar: BindingConfig::one("prefix+b"),
+            hide_sidebar: BindingConfig::empty(),
+            show_sidebar: BindingConfig::empty(),
             indexed: IndexedKeysConfig::default(),
             command: Vec::new(),
             user_fields: BTreeSet::new(),
@@ -1163,6 +1182,8 @@ impl Default for UiConfig {
             sidebar_max_width: 36,
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
+            workspace_open_action: String::new(),
+            workspace_open_action_title: "Open in new window".into(),
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,

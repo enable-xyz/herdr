@@ -101,6 +101,14 @@ impl ClientShellConfig {
             sidebar_max_width: config.ui.sidebar_max_width,
             sidebar_start_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
+            workspace_open_action: (!config.ui.workspace_open_action.trim().is_empty())
+                .then(|| config.ui.workspace_open_action.trim().to_owned()),
+            workspace_open_action_title: if config.ui.workspace_open_action_title.trim().is_empty()
+            {
+                "Open in new window".into()
+            } else {
+                config.ui.workspace_open_action_title.trim().to_owned()
+            },
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
@@ -303,6 +311,14 @@ impl ClientShellConfig {
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
                 self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
+                self.workspace_open_action = (!ui.workspace_open_action.trim().is_empty())
+                    .then(|| ui.workspace_open_action.trim().to_owned());
+                self.workspace_open_action_title =
+                    if ui.workspace_open_action_title.trim().is_empty() {
+                        "Open in new window".into()
+                    } else {
+                        ui.workspace_open_action_title.trim().to_owned()
+                    };
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;

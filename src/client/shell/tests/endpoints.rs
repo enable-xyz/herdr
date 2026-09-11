@@ -256,6 +256,7 @@ fn sidebar_renders_local_and_saved_ssh_endpoints_with_status() {
 }
 
 #[test]
+
 fn active_workspace_is_the_only_highlight_when_machine_is_expanded() {
     let (mut state, endpoint_id) = state_with_remote();
     assert!(state.activate_endpoint_projection(&endpoint_id));
@@ -1202,4 +1203,36 @@ fn navigator_foreign_tab_selection_keeps_the_tab_target() {
             target: Some(ClientEndpointFocusTarget::Tab(tab_id)),
         }] if activated == &endpoint_id && tab_id == "tab_1"
     ));
+}
+
+#[test]
+fn sidebar_plugin_action_stays_on_clicked_endpoint_and_agent_workspace() {
+    let config: Config =
+        toml::from_str("[ui]\nworkspace_open_action = \"example.window.open\"\n").unwrap();
+    let (mut state, remote) = state_with_remote();
+    state.config = ClientShellConfig::from_config(&config);
+    let target = ClientSidebarActionTarget {
+        endpoint_id: remote.clone(),
+        workspace_id: "ws_1".into(),
+        pane_id: Some("pane_1".into()),
+    };
+    let mut outcome = ClientShellInput::default();
+    assert!(state.invoke_sidebar_workspace_action(target, &mut outcome));
+    let [ClientShellAction::Endpoint {
+        endpoint_id,
+        boot_id,
+        request,
+    }] = outcome.actions.as_slice()
+    else {
+        panic!("plugin invocation endpoint action");
+    };
+    assert_eq!(endpoint_id, &remote);
+    assert_eq!(boot_id, "remote-boot");
+    let crate::api::schema::Method::PluginActionInvoke(params) = &request.method else {
+        panic!("plugin action invocation");
+    };
+    let context = params.context.as_ref().unwrap();
+    assert_eq!(context.workspace_id.as_deref(), Some("ws_1"));
+    assert_eq!(context.workspace_label.as_deref(), Some("remote-workspace"));
+    assert_eq!(context.focused_pane_id.as_deref(), Some("pane_1"));
 }
