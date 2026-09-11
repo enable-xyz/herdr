@@ -244,10 +244,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
-# Optional qualified plugin action invoked by double-clicking a workspace or agent row
+# Optional client-shell command binding invoked by double-clicking a workspace or agent row
 # and exposed in those rows' right-click menus. Empty disables both gestures.
-# workspace_open_action = ""
-# workspace_open_action_title = "Open in new window"
+# workspace_open_command = ""
+# workspace_open_command_title = "Open in new window"
 
 
 # Terminal width at or below which Herdr uses the mobile single-column layout.

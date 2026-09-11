@@ -385,19 +385,34 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_group_close(
     ));
 }
 
-#[test]
-fn sidebar_open_gesture_targets_exact_workspace_suppresses_bursts_and_resets_on_drag() {
-    let config: Config = toml::from_str(
-        "[ui]\nworkspace_open_action = \"example.window.open\"\nworkspace_open_action_title = \"Open elsewhere\"\n",
+fn sidebar_command_config() -> Config {
+    toml::from_str(
+        "[ui]\nworkspace_open_command = \"prefix+alt+o\"\nworkspace_open_command_title = \"Open elsewhere\"\n",
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn advertise_sidebar_command(snapshot: &mut ClientShellSnapshot) {
+    snapshot.commands.push(crate::protocol::ClientShellCommand {
+        command_id: "cmd_open_window".into(),
+        binding_label: "prefix+alt+o".into(),
+        binding_labels: vec!["prefix+alt+o".into()],
+        action: crate::protocol::ClientShellCommandAction::PluginAction,
+        description: None,
+    });
+}
+
+#[test]
+fn sidebar_open_gesture_targets_exact_workspace_suppresses_bursts_and_resets() {
     let mut projected = snapshot();
+    advertise_sidebar_command(&mut projected);
     let mut other = projected.workspaces[0].clone();
     other.workspace_id = "ws_2".into();
     other.label = "other".into();
     other.focused = false;
     projected.workspaces.push(other);
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state =
+        ClientShellState::new(ClientShellConfig::from_config(&sidebar_command_config()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     state.compose(106, 24).unwrap();
@@ -410,33 +425,59 @@ fn sidebar_open_gesture_targets_exact_workspace_suppresses_bursts_and_resets_on_
             modifiers: KeyModifiers::empty(),
         })
     };
+    let click = |state: &mut ClientShellState| {
+        state.handle_raw_events(vec![event(MouseEventKind::Down(MouseButton::Left))]);
+        state.handle_raw_events(vec![event(MouseEventKind::Up(MouseButton::Left))])
+    };
+    let command_count =
+        |outcome: &ClientShellInput| {
+            outcome
+            .actions
+            .iter()
+            .filter(|action| matches!(
+                action,
+                ClientShellAction::Endpoint { request, .. }
+                    if matches!(request.method, crate::api::schema::Method::CommandInvoke(_))
+            ))
+            .count()
+        };
 
-    state.handle_raw_events(vec![event(MouseEventKind::Down(MouseButton::Left))]);
-    let first = state.handle_raw_events(vec![event(MouseEventKind::Up(MouseButton::Left))]);
-    assert_eq!(first.actions.len(), 1);
-    state.handle_raw_events(vec![event(MouseEventKind::Down(MouseButton::Left))]);
-    let second = state.handle_raw_events(vec![event(MouseEventKind::Up(MouseButton::Left))]);
-    let invokes = second
-        .actions
-        .iter()
-        .filter_map(|action| match action {
-            ClientShellAction::Endpoint { request, .. } => match &request.method {
-                crate::api::schema::Method::PluginActionInvoke(params) => Some(params),
-                _ => None,
-            },
+    assert_eq!(command_count(&click(&mut state)), 0);
+    let second = click(&mut state);
+    assert_eq!(command_count(&second), 1);
+    let command = second.actions.iter().find_map(|action| match action {
+        ClientShellAction::Endpoint { request, .. } => match &request.method {
+            crate::api::schema::Method::CommandInvoke(params) => Some(params),
             _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(invokes.len(), 1);
-    assert_eq!(invokes[0].action_id, "example.window.open");
-    let context = invokes[0].context.as_ref().unwrap();
-    assert_eq!(context.workspace_id.as_deref(), Some("ws_2"));
-    assert_eq!(context.workspace_label.as_deref(), Some("other"));
-    assert_eq!(context.focused_pane_id, None);
+        },
+        _ => None,
+    });
+    assert!(matches!(
+        command,
+        Some(params)
+            if params.command_id == "cmd_open_window"
+                && params.workspace_id.as_deref() == Some("ws_2")
+                && params.pane_id.is_none()
+    ));
+    assert_eq!(command_count(&click(&mut state)), 0);
+    assert_eq!(command_count(&click(&mut state)), 0);
 
-    state.handle_raw_events(vec![event(MouseEventKind::Down(MouseButton::Left))]);
-    let third = state.handle_raw_events(vec![event(MouseEventKind::Up(MouseButton::Left))]);
-    assert_eq!(third.actions.len(), 1, "third burst click only focuses");
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: row.x,
+        row: row.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.last_sidebar_action_click.is_none());
+    assert_eq!(command_count(&click(&mut state)), 0);
+    let pane = state.hits.panes[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: pane.x,
+        row: pane.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.last_sidebar_action_click.is_none());
     state.handle_raw_events(vec![event(MouseEventKind::Down(MouseButton::Left))]);
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Drag(MouseButton::Left),
@@ -448,13 +489,12 @@ fn sidebar_open_gesture_targets_exact_workspace_suppresses_bursts_and_resets_on_
 }
 
 #[test]
-fn workspace_context_menu_dispatches_captured_plugin_target() {
-    let config: Config = toml::from_str(
-        "[ui]\nworkspace_open_action = \"example.window.open\"\nworkspace_open_action_title = \"Open elsewhere\"\n",
-    )
-    .unwrap();
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
-    state.set_snapshot(Box::new(snapshot()));
+fn workspace_context_menu_dispatches_captured_command_target() {
+    let mut projected = snapshot();
+    advertise_sidebar_command(&mut projected);
+    let mut state =
+        ClientShellState::new(ClientShellConfig::from_config(&sidebar_command_config()));
+    state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     state.compose(106, 20).unwrap();
     let workspace = state.hits.workspaces[0].rect;
@@ -474,17 +514,16 @@ fn workspace_context_menu_dispatches_captured_plugin_target() {
     assert!(matches!(
         outcome.actions.as_slice(),
         [ClientShellAction::Endpoint { request, .. }]
-            if matches!(&request.method, crate::api::schema::Method::PluginActionInvoke(params)
-                if params.context.as_ref().and_then(|context| context.workspace_id.as_deref())
-                    == Some("ws_1"))
+            if matches!(&request.method, crate::api::schema::Method::CommandInvoke(params)
+                if params.command_id == "cmd_open_window"
+                    && params.workspace_id.as_deref() == Some("ws_1"))
     ));
 }
 
 #[test]
 fn agent_row_double_click_and_menu_include_clicked_pane_context() {
-    let config: Config =
-        toml::from_str("[ui]\nworkspace_open_action = \"example.window.open\"\n").unwrap();
     let mut projected = snapshot();
+    advertise_sidebar_command(&mut projected);
     projected.agents.push(ClientShellAgent {
         pane_id: "pane_1".into(),
         workspace_id: "ws_1".into(),
@@ -501,7 +540,8 @@ fn agent_row_double_click_and_menu_include_clicked_pane_context() {
         tokens: Vec::new(),
         focused: true,
     });
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let mut state =
+        ClientShellState::new(ClientShellConfig::from_config(&sidebar_command_config()));
     state.set_snapshot(Box::new(projected));
     state.set_pane_surface(surface());
     state.compose(106, 30).unwrap();
@@ -519,11 +559,10 @@ fn agent_row_double_click_and_menu_include_clicked_pane_context() {
     assert!(second.actions.iter().any(|action| matches!(
         action,
         ClientShellAction::Endpoint { request, .. }
-            if matches!(&request.method, crate::api::schema::Method::PluginActionInvoke(params)
-                if params.context.as_ref().is_some_and(|context|
-                    context.workspace_id.as_deref() == Some("ws_1")
-                        && context.focused_pane_id.as_deref() == Some("pane_1")
-                        && context.focused_pane_agent.as_deref() == Some("moshi")))
+            if matches!(&request.method, crate::api::schema::Method::CommandInvoke(params)
+                if params.workspace_id.as_deref() == Some("ws_1")
+                    && params.tab_id.as_deref() == Some("tab_1")
+                    && params.pane_id.as_deref() == Some("pane_1"))
     )));
 
     state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -543,4 +582,29 @@ fn agent_row_double_click_and_menu_include_clicked_pane_context() {
             ..
         })) if workspace_id == "ws_1" && pane_id == "pane_1"
     ));
+}
+
+#[test]
+fn sidebar_command_requires_one_matching_advertised_plugin_action() {
+    let mut projected = snapshot();
+    advertise_sidebar_command(&mut projected);
+    advertise_sidebar_command(&mut projected);
+    projected.commands[1].command_id = "cmd_duplicate".into();
+    let mut state =
+        ClientShellState::new(ClientShellConfig::from_config(&sidebar_command_config()));
+    state.set_snapshot(Box::new(projected));
+    let mut outcome = ClientShellInput::default();
+    assert!(!state.invoke_sidebar_workspace_action(
+        ClientSidebarActionTarget {
+            endpoint_id: ClientEndpointId::Local,
+            workspace_id: "ws_1".into(),
+            pane_id: None,
+        },
+        &mut outcome,
+    ));
+    assert!(outcome.actions.is_empty());
+    assert!(state
+        .endpoint_error
+        .as_deref()
+        .is_some_and(|message| message.contains("not uniquely available")));
 }

@@ -73,15 +73,13 @@ impl ClientShellState {
         target: ClientSidebarActionTarget,
         outcome: &mut ClientShellInput,
     ) -> bool {
-        let Some(action_id) = self.config.workspace_open_action.clone() else {
+        if target.endpoint_id != self.active_endpoint_id {
+            return false;
+        }
+        let Some(binding_label) = self.config.workspace_open_command.as_deref() else {
             return false;
         };
-        let Some(snapshot) = self
-            .endpoints
-            .iter()
-            .find(|endpoint| endpoint.endpoint_id == target.endpoint_id)
-            .and_then(|endpoint| endpoint.snapshot.as_deref())
-        else {
+        let Some(snapshot) = self.snapshot.as_deref() else {
             return false;
         };
         let Some(workspace) = snapshot
@@ -91,51 +89,39 @@ impl ClientShellState {
         else {
             return false;
         };
-        let pane = target
-            .pane_id
-            .as_ref()
-            .and_then(|pane_id| snapshot.panes.iter().find(|pane| pane.pane_id == *pane_id));
-        let agent = target.pane_id.as_ref().and_then(|pane_id| {
-            snapshot
-                .agents
-                .iter()
-                .find(|agent| agent.pane_id == *pane_id)
+        let pane = target.pane_id.as_ref().and_then(|pane_id| {
+            snapshot.panes.iter().find(|pane| {
+                pane.pane_id == *pane_id && pane.workspace_id == workspace.workspace_id
+            })
         });
-        let context = crate::api::schema::PluginInvocationContext {
-            workspace_id: Some(workspace.workspace_id.clone()),
-            workspace_label: Some(workspace.label.clone()),
-            workspace_cwd: Some(workspace.new_workspace_cwd.clone()),
-            worktree: None,
-            tab_id: pane.map(|pane| pane.tab_id.clone()),
-            tab_label: pane.and_then(|pane| {
-                snapshot
-                    .tabs
+        if target.pane_id.is_some() && pane.is_none() {
+            return false;
+        }
+        let mut commands = snapshot.commands.iter().filter(|command| {
+            command.action == crate::protocol::ClientShellCommandAction::PluginAction
+                && command
+                    .binding_labels
                     .iter()
-                    .find(|tab| tab.tab_id == pane.tab_id)
-                    .map(|tab| tab.label.clone())
-            }),
-            focused_pane_id: target.pane_id.clone(),
-            focused_pane_cwd: pane.and_then(|pane| pane.cwd.clone()),
-            focused_pane_agent: agent.and_then(|agent| agent.agent.clone()),
-            focused_pane_status: agent.map(|agent| agent.agent_status),
-            selected_text: None,
-            invocation_source: Some("sidebar".into()),
-            correlation_id: None,
-            clicked_url: None,
-            link_handler_id: None,
+                    .any(|label| label == binding_label)
+        });
+        let command_id = commands.next().map(|command| command.command_id.clone());
+        let unique = command_id.is_some() && commands.next().is_none();
+        if !unique {
+            self.endpoint_error = Some(format!(
+                "sidebar open command {binding_label} is not uniquely available; reload configuration"
+            ));
+            outcome.repaint = true;
+            return false;
+        }
+        let params = crate::api::schema::CommandInvokeParams {
+            command_id: command_id.unwrap_or_default(),
+            workspace_id: Some(workspace.workspace_id.clone()),
+            tab_id: pane.map(|pane| pane.tab_id.clone()),
+            pane_id: target.pane_id,
+            selection: None,
         };
-        self.push_endpoint_method_for(
-            target.endpoint_id,
-            crate::api::schema::Method::PluginActionInvoke(
-                crate::api::schema::PluginActionInvokeParams {
-                    action_id,
-                    plugin_id: None,
-                    context: Some(context),
-                },
-            ),
-            PendingEndpointKind::Generic,
-            outcome,
-        )
+        self.push_endpoint_method(crate::api::schema::Method::CommandInvoke(params), outcome);
+        true
     }
 
     pub(super) fn record_sidebar_action_click(
@@ -144,26 +130,33 @@ impl ClientShellState {
         now: std::time::Instant,
         outcome: &mut ClientShellInput,
     ) {
-        if self.config.workspace_open_action.is_none() {
+        if self.config.workspace_open_command.is_none()
+            || target.endpoint_id != self.active_endpoint_id
+        {
             self.last_sidebar_action_click = None;
             return;
         }
         const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(350);
-        let invoke = self
+        let same_burst = self
             .last_sidebar_action_click
             .as_ref()
             .is_some_and(|previous| {
                 previous.target == target
-                    && !previous.invoked
                     && now.saturating_duration_since(previous.at) <= DOUBLE_CLICK
             });
+        let already_invoked = same_burst
+            && self
+                .last_sidebar_action_click
+                .as_ref()
+                .is_some_and(|previous| previous.invoked);
+        let invoke = same_burst && !already_invoked;
         if invoke {
             self.invoke_sidebar_workspace_action(target.clone(), outcome);
         }
         self.last_sidebar_action_click = Some(ClientSidebarActionClick {
             target,
             at: now,
-            invoked: invoke,
+            invoked: invoke || already_invoked,
         });
     }
 

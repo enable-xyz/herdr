@@ -922,11 +922,11 @@ pub struct UiConfig {
     pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
-    /// Qualified plugin action invoked from a sidebar workspace or agent row.
+    /// Client-shell command binding invoked from a sidebar workspace or agent row.
     /// Empty disables sidebar open gestures. Default: empty.
-    pub workspace_open_action: String,
-    /// Label for the configured sidebar open action. Default: "Open in new window".
-    pub workspace_open_action_title: String,
+    pub workspace_open_command: String,
+    /// Label for the configured sidebar open command. Default: "Open in new window".
+    pub workspace_open_command_title: String,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
@@ -1182,8 +1182,8 @@ impl Default for UiConfig {
             sidebar_max_width: 36,
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
-            workspace_open_action: String::new(),
-            workspace_open_action_title: "Open in new window".into(),
+            workspace_open_command: String::new(),
+            workspace_open_command_title: "Open in new window".into(),
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,

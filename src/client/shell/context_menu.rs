@@ -145,9 +145,9 @@ impl ClientShellState {
             y,
             sidebar_action_label: self
                 .config
-                .workspace_open_action
+                .workspace_open_command
                 .as_ref()
-                .map(|_| self.config.workspace_open_action_title.clone()),
+                .map(|_| self.config.workspace_open_command_title.clone()),
             highlighted: 0,
         }));
     }
@@ -158,14 +158,14 @@ impl ClientShellState {
         x: u16,
         y: u16,
     ) {
-        if self.config.workspace_open_action.is_none() {
+        if self.config.workspace_open_command.is_none() {
             return;
         }
         self.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
             target: ClientContextMenuTarget::SidebarAction(target),
             x,
             y,
-            sidebar_action_label: Some(self.config.workspace_open_action_title.clone()),
+            sidebar_action_label: Some(self.config.workspace_open_command_title.clone()),
             highlighted: 0,
         }));
     }

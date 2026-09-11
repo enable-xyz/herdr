@@ -603,6 +603,16 @@ impl ClientShellState {
 
     pub(super) fn handle_mouse(&mut self, mouse: MouseEvent, outcome: &mut ClientShellInput) {
         let point = (mouse.column, mouse.row);
+        let reset_sidebar_click = match mouse.kind {
+            MouseEventKind::Moved => false,
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left) => {
+                self.overlay.is_some() || self.sidebar_action_target_at(point).is_none()
+            }
+            _ => true,
+        };
+        if reset_sidebar_click {
+            self.last_sidebar_action_click = None;
+        }
         if matches!(self.overlay, Some(ClientShellOverlay::Onboarding)) {
             if mouse.kind == MouseEventKind::Down(MouseButton::Left)
                 && super::contains(self.hits.overlay_primary, point)
@@ -1726,7 +1736,10 @@ impl ClientShellState {
                     return;
                 }
                 if let Some(target) = self.sidebar_action_target_at(point) {
-                    if target.pane_id.is_some() || target.endpoint_id != self.active_endpoint_id {
+                    if target.endpoint_id != self.active_endpoint_id {
+                        return;
+                    }
+                    if target.pane_id.is_some() {
                         self.open_agent_context_menu(target, mouse.column, mouse.row);
                     } else {
                         self.open_workspace_context_menu(

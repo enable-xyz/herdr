@@ -1206,33 +1206,26 @@ fn navigator_foreign_tab_selection_keeps_the_tab_target() {
 }
 
 #[test]
-fn sidebar_plugin_action_stays_on_clicked_endpoint_and_agent_workspace() {
+fn inactive_endpoint_sidebar_rows_do_not_expose_active_only_open_command() {
     let config: Config =
-        toml::from_str("[ui]\nworkspace_open_action = \"example.window.open\"\n").unwrap();
+        toml::from_str("[ui]\nworkspace_open_command = \"prefix+alt+o\"\n").unwrap();
     let (mut state, remote) = state_with_remote();
     state.config = ClientShellConfig::from_config(&config);
-    let target = ClientSidebarActionTarget {
-        endpoint_id: remote.clone(),
-        workspace_id: "ws_1".into(),
-        pane_id: Some("pane_1".into()),
-    };
-    let mut outcome = ClientShellInput::default();
-    assert!(state.invoke_sidebar_workspace_action(target, &mut outcome));
-    let [ClientShellAction::Endpoint {
-        endpoint_id,
-        boot_id,
-        request,
-    }] = outcome.actions.as_slice()
-    else {
-        panic!("plugin invocation endpoint action");
-    };
-    assert_eq!(endpoint_id, &remote);
-    assert_eq!(boot_id, "remote-boot");
-    let crate::api::schema::Method::PluginActionInvoke(params) = &request.method else {
-        panic!("plugin action invocation");
-    };
-    let context = params.context.as_ref().unwrap();
-    assert_eq!(context.workspace_id.as_deref(), Some("ws_1"));
-    assert_eq!(context.workspace_label.as_deref(), Some("remote-workspace"));
-    assert_eq!(context.focused_pane_id.as_deref(), Some("pane_1"));
+    state.compose(100, 28).unwrap();
+    let remote_workspace = state
+        .hits
+        .workspaces
+        .iter()
+        .find(|hit| hit.endpoint_id == remote)
+        .expect("remote workspace")
+        .rect;
+    let outcome =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: remote_workspace.x,
+            row: remote_workspace.y,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(outcome.actions.is_empty());
+    assert!(state.overlay.is_none());
 }
