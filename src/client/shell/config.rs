@@ -117,6 +117,7 @@ impl ClientShellConfig {
                 config.ui.workspace_open_command_title.trim().to_owned()
             },
             mobile_width_threshold: config.ui.mobile_width_threshold,
+            content_margins: config.ui.content_margins,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             spaces: config.ui.sidebar.spaces.clone(),
@@ -352,6 +353,7 @@ impl ClientShellConfig {
                         ui.workspace_open_command_title.trim().to_owned()
                     };
                 self.mobile_width_threshold = ui.mobile_width_threshold;
+                self.content_margins = ui.content_margins;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.spaces = ui.sidebar.spaces.clone();
@@ -387,7 +389,40 @@ impl ClientShellConfig {
 
         diagnostics
     }
+}
 
+const CONTENT_MIN_WIDTH: u16 = 80;
+const CONTENT_MAX_WIDTH: u16 = 120;
+const CONTENT_MARGIN_WITH_SIDEBAR: u16 = 3;
+const CONTENT_MARGIN_WITHOUT_SIDEBAR: u16 = 10;
+const CONTENT_VERTICAL_MARGIN_MIN_HEIGHT: u16 = 12;
+
+fn inset_pane_surface(area: Rect, sidebar_visible: bool) -> Rect {
+    let horizontal_inset = if area.width <= CONTENT_MIN_WIDTH {
+        0
+    } else {
+        let minimum_margin = if sidebar_visible {
+            CONTENT_MARGIN_WITH_SIDEBAR
+        } else {
+            CONTENT_MARGIN_WITHOUT_SIDEBAR
+        };
+        let desired_inset = minimum_margin
+            .saturating_mul(2)
+            .max(area.width.saturating_sub(CONTENT_MAX_WIDTH));
+        desired_inset.min(area.width.saturating_sub(CONTENT_MIN_WIDTH))
+    };
+    let left = horizontal_inset / 2;
+
+    let vertical_inset = u16::from(area.height >= CONTENT_VERTICAL_MARGIN_MIN_HEIGHT);
+    Rect::new(
+        area.x.saturating_add(left),
+        area.y.saturating_add(vertical_inset),
+        area.width.saturating_sub(horizontal_inset),
+        area.height.saturating_sub(vertical_inset.saturating_mul(2)),
+    )
+}
+
+impl ClientShellConfig {
     pub(super) fn layout(
         &self,
         cols: u16,
@@ -443,6 +478,11 @@ impl ClientShellConfig {
                 Rect::new(main.x, 0, main.width, rows.saturating_sub(tab_height)),
             ),
         };
+        let pane_surface = if self.content_margins {
+            inset_pane_surface(pane_surface, sidebar_width > 0)
+        } else {
+            pane_surface
+        };
 
         ClientShellLayout {
             sidebar: Rect::new(0, 0, sidebar_width, rows),
@@ -489,6 +529,7 @@ mod tests {
         let mut shell = ClientShellConfig::from_config(&Config::default());
         let mut next = Config::default();
         next.ui.sidebar_width = 31;
+        next.ui.content_margins = true;
         next.ui.tab_bar_position = TabBarPositionConfig::Bottom;
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
@@ -499,6 +540,7 @@ mod tests {
 
         assert!(diagnostics.is_empty());
         assert_eq!(shell.sidebar_width, 31);
+        assert!(shell.content_margins);
         assert_eq!(shell.tab_bar_position, TabBarPositionConfig::Bottom);
         assert_eq!(
             shell.agent_panel_sort,
@@ -548,6 +590,97 @@ mod tests {
         let state = ClientShellState::new(config);
         assert_eq!(initial, state.surface_size(100, 30));
         std::fs::remove_file(path).expect("remove endpoint chrome");
+    }
+
+    #[test]
+    fn content_margins_adapt_to_sidebar_and_available_width() {
+        let mut config = Config::default();
+        config.ui.content_margins = true;
+        config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+        let shell = ClientShellConfig::from_config(&config);
+
+        let expanded = shell.layout(140, 30, false, 2, 26);
+        assert_eq!(expanded.sidebar, Rect::new(0, 0, 26, 30));
+        assert_eq!(expanded.tab_bar, Rect::new(26, 0, 114, 1));
+        assert_eq!(expanded.pane_surface, Rect::new(29, 2, 108, 27));
+
+        let hidden = shell.layout(140, 30, true, 2, 26);
+        assert!(hidden.sidebar.is_empty());
+        assert_eq!(hidden.tab_bar, Rect::new(0, 0, 140, 1));
+        assert_eq!(hidden.pane_surface, Rect::new(10, 2, 120, 27));
+
+        let wide = shell.layout(200, 30, false, 2, 26);
+        assert_eq!(wide.pane_surface, Rect::new(53, 2, 120, 27));
+
+        let constrained = shell.layout(106, 30, false, 2, 26);
+        assert_eq!(constrained.pane_surface, Rect::new(26, 2, 80, 27));
+
+        let shrinking = shell.layout(85, 30, true, 2, 26);
+        assert_eq!(shrinking.pane_surface, Rect::new(2, 2, 80, 27));
+
+        let mut state = ClientShellState::new(shell);
+        assert_eq!(
+            state.surface_size(140, 30),
+            ClientSurfaceSize {
+                cols: 108,
+                rows: 27,
+            }
+        );
+        state.sidebar_collapsed = true;
+        assert_eq!(
+            state.surface_size(140, 30),
+            ClientSurfaceSize {
+                cols: 120,
+                rows: 27,
+            }
+        );
+    }
+
+    #[test]
+    fn content_margins_preserve_mobile_and_short_layouts() {
+        let mut config = Config::default();
+        config.ui.content_margins = true;
+        let shell = ClientShellConfig::from_config(&config);
+
+        let mobile = shell.layout(64, 30, false, 2, 26);
+        assert_eq!(mobile.pane_surface, Rect::new(0, 2, 64, 28));
+
+        let short = shell.layout(140, 12, false, 2, 26);
+        assert_eq!(short.pane_surface, Rect::new(29, 1, 108, 11));
+
+        let enough = shell.layout(140, 13, false, 2, 26);
+        assert_eq!(enough.pane_surface, Rect::new(29, 2, 108, 10));
+    }
+
+    #[test]
+    fn content_margins_default_off_and_initial_size_matches_runtime_layout() {
+        let default = ClientShellConfig::from_config(&Config::default());
+        assert!(!default.content_margins);
+        assert_eq!(
+            default.layout(200, 30, false, 2, 26).pane_surface,
+            Rect::new(26, 1, 174, 29)
+        );
+
+        let mut config = Config::default();
+        config.ui.content_margins = true;
+        config.ui.sidebar_start_collapsed = true;
+        config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+        let shell = ClientShellConfig::from_config(&config);
+        assert_eq!(
+            shell.initial_surface_size(140, 30),
+            ClientSurfaceSize {
+                cols: 120,
+                rows: 27,
+            }
+        );
+        let state = ClientShellState::new(shell);
+        assert_eq!(
+            state.surface_size(140, 30),
+            ClientSurfaceSize {
+                cols: 120,
+                rows: 27,
+            }
+        );
     }
 
     #[test]
