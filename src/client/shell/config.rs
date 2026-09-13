@@ -37,9 +37,12 @@ impl ClientShellState {
             sidebar_section_split: self
                 .sidebar_section_split_manual
                 .then_some(self.sidebar_section_split),
-            sidebar_collapsed: self
-                .sidebar_collapsed_manual
-                .then_some(self.sidebar_collapsed),
+            sidebar_collapsed: if self.launch_sidebar_override_active {
+                self.config.preferences.sidebar_collapsed
+            } else {
+                self.sidebar_collapsed_manual
+                    .then_some(self.sidebar_collapsed)
+            },
             agent_panel_sort: self
                 .agent_panel_sort_manual
                 .then_some(self.config.agent_panel_sort),
@@ -154,6 +157,8 @@ impl ClientShellConfig {
             preferences: preferences::ClientChromePreferences::default(),
             startup_config_diagnostic: None,
             startup_onboarding: false,
+            launch_target: None,
+            launch_hide_sidebar: false,
         }
     }
 
@@ -175,6 +180,27 @@ impl ClientShellConfig {
 
     pub(crate) fn uses_endpoint_keybindings(&self) -> bool {
         self.keybinding_source == ClientShellKeybindingSource::Endpoint
+    }
+
+    pub(crate) fn with_launch_options(
+        mut self,
+        options: &crate::client::ClientLaunchOptions,
+    ) -> Self {
+        self.launch_target =
+            options
+                .workspace_id
+                .as_ref()
+                .map(|workspace_id| ClientShellLaunchTarget {
+                    workspace_id: workspace_id.clone(),
+                    pane_id: options.pane_id.clone(),
+                    requested_boot_id: None,
+                    requested_generation: None,
+                });
+        self.launch_hide_sidebar = options.hide_sidebar;
+        if options.hide_sidebar {
+            self.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+        }
+        self
     }
 
     pub(super) fn local_config_diagnostic(&self, diagnostics: &[String]) -> Option<String> {
@@ -314,7 +340,9 @@ impl ClientShellConfig {
                 self.sidebar_width = ui.sidebar_width;
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
-                self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
+                if !self.launch_hide_sidebar {
+                    self.sidebar_collapsed_mode = ui.sidebar_collapsed_mode;
+                }
                 self.workspace_open_command = (!ui.workspace_open_command.trim().is_empty())
                     .then(|| ui.workspace_open_command.trim().to_owned());
                 self.workspace_open_command_title =
@@ -425,10 +453,13 @@ impl ClientShellConfig {
     }
 
     pub(crate) fn initial_surface_size(&self, cols: u16, rows: u16) -> ClientSurfaceSize {
-        let sidebar_collapsed = self
-            .preferences
-            .sidebar_collapsed
-            .unwrap_or(self.sidebar_start_collapsed);
+        let sidebar_collapsed = if self.launch_hide_sidebar {
+            true
+        } else {
+            self.preferences
+                .sidebar_collapsed
+                .unwrap_or(self.sidebar_start_collapsed)
+        };
         let (min_width, max_width) =
             crate::config::validated_sidebar_bounds(self.sidebar_min_width, self.sidebar_max_width)
                 .unwrap_or((18, 36));

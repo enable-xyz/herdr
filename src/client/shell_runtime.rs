@@ -552,14 +552,15 @@ pub(super) fn install_client_shell_snapshot(
     projection_pending: bool,
     endpoints: &mut endpoint::EndpointRegistry,
     prefix_input_source: &mut impl crate::platform::PrefixInputSource,
-) -> Result<(), ClientError> {
+) -> Result<Vec<shell::ClientShellAction>, ClientError> {
     let Some(connection) = endpoints.connection(endpoint_id) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let generation = connection.generation;
     let project_snapshot =
         !projection_pending && endpoints.active_id() == endpoint_id && connection.surface_active;
-    let (composed, resize, graphics_cleanup) = if let Some(shell) = &mut state.shell {
+    let (composed, resize, graphics_cleanup, launch_actions) = if let Some(shell) = &mut state.shell
+    {
         let waits_for_selected_surface = projection_pending
             || (endpoints.active_id() == endpoint_id
                 && !project_snapshot
@@ -568,19 +569,32 @@ pub(super) fn install_client_shell_snapshot(
         if !waits_for_selected_surface {
             shell.set_endpoint_status(endpoint_id, endpoint::ClientEndpointStatus::Online);
         }
-        if project_snapshot {
+        let launch_snapshot = project_snapshot.then(|| snapshot.clone());
+        let launch_actions = if project_snapshot {
             shell.set_endpoint_snapshot_for_generation(endpoint_id, generation, snapshot);
+            shell
+                .prepare_launch_target(
+                    endpoint_id,
+                    launch_snapshot
+                        .as_deref()
+                        .expect("projected snapshot was retained for launch targeting"),
+                    generation,
+                )
+                .map_err(ClientError::LaunchTarget)?
         } else {
             shell.cache_endpoint_snapshot_inactive_for_generation(
                 endpoint_id,
                 generation,
                 snapshot,
             );
-        }
+            Vec::new()
+        };
         let graphics_cleanup = shell.take_pending_graphics_cleanup();
         let next_size = shell.surface_size(state.reported_size.0, state.reported_size.1);
         (
-            shell.compose(state.reported_size.0, state.reported_size.1),
+            (!shell.launch_target_pending())
+                .then(|| shell.compose(state.reported_size.0, state.reported_size.1))
+                .flatten(),
             (previous_size != next_size).then(|| {
                 client_shell_resize_message(
                     shell,
@@ -592,9 +606,10 @@ pub(super) fn install_client_shell_snapshot(
                 )
             }),
             graphics_cleanup,
+            launch_actions,
         )
     } else {
-        (None, None, Vec::new())
+        (None, None, Vec::new(), Vec::new())
     };
     apply_client_shell_input_source_changes(state, prefix_input_source);
     state.present_graphics(&graphics_cleanup);
@@ -608,7 +623,7 @@ pub(super) fn install_client_shell_snapshot(
             state.present_frozen_chrome(frame);
         }
     }
-    Ok(())
+    Ok(launch_actions)
 }
 
 pub(super) fn finish_client_shell_input(

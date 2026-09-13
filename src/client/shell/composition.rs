@@ -99,6 +99,9 @@ impl ClientShellState {
     }
 
     pub(crate) fn compose(&mut self, cols: u16, rows: u16) -> Option<FrameData> {
+        if self.launch_target_pending() {
+            return None;
+        }
         self.last_composed_size = Some((cols, rows));
         if self.snapshot.is_none() || self.pane_surface.is_none() {
             return Some(self.compose_unavailable(cols, rows));

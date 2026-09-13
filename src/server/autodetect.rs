@@ -316,7 +316,7 @@ pub fn auto_detect_launch(saved_federation: bool) -> io::Result<()> {
     }
 
     // Now attach as a thin client.
-    crate::client::run_client()
+    crate::client::run_client(crate::client::ClientLaunchOptions::default())
 }
 
 // ---------------------------------------------------------------------------

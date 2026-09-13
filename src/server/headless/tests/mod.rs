@@ -1489,10 +1489,12 @@ async fn client_local_navigation_does_not_emit_global_focus_transitions() {
     server.app.state.active = Some(0);
     server.app.state.selected = 0;
     server.app.state.mode = crate::app::Mode::Terminal;
+    let first_tab_id = server.app.public_tab_id(0, 0).unwrap();
     let second_tab_id = server.app.public_tab_id(0, second_tab).unwrap();
+    let second_pane_id = server.app.public_pane_id(0, second_pane).unwrap();
 
-    let (first_control, _) = connect_matching_test_shell(&mut server, 61);
-    let (second_control, _) = connect_matching_test_shell(&mut server, 62);
+    let (first_control, _) = connect_test_shell(&mut server, 61, 100, 30);
+    let (second_control, _) = connect_test_shell(&mut server, 62, 80, 24);
     let _ = first_control.recv().expect("first snapshot");
     let _ = second_control.recv().expect("second snapshot");
     assert!(server.focus_shell_client_on_tab(62, &second_tab_id));
@@ -1504,15 +1506,29 @@ async fn client_local_navigation_does_not_emit_global_focus_transitions() {
         62,
         crate::api::ApiRequestMessage {
             request: crate::api::schema::Request {
-                id: "focus-own-tab".into(),
-                method: crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget {
-                    tab_id: second_tab_id,
+                id: "focus-launch-target".into(),
+                method: crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                    pane_id: second_pane_id,
                 }),
             },
             respond_to,
             response_write_complete: None,
             stream_active: None,
         },
+    );
+    assert_eq!(
+        server.shell_tab_id_for_client(61).as_deref(),
+        Some(first_tab_id.as_str()),
+        "a connection-local launch target must not move another client"
+    );
+    assert_eq!(
+        server.shell_tab_id_for_client(62).as_deref(),
+        Some(second_tab_id.as_str())
+    );
+    assert_eq!(
+        server.tab_geometry_controllers.get(&second_tab_id),
+        Some(&62),
+        "target navigation must retain ordinary active-client geometry ownership"
     );
     server.app.sync_focus_events();
     assert!(first_input.try_recv().is_err());

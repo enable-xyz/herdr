@@ -52,9 +52,7 @@ use transport::*;
 
 #[cfg(test)]
 pub(crate) use shell::{ClientShellConfig, ClientShellState};
-pub use startup::{run_client, run_terminal_attach};
-pub use terminal_sessions::{run_terminal_session_control, run_terminal_session_observe};
-
+pub use startup::{parse_client_launch_args, run_client, run_terminal_attach, ClientLaunchOptions};
 #[cfg(not(windows))]
 use terminal_geometry::query_host_terminal_appearance;
 #[cfg(test)]
@@ -69,6 +67,7 @@ use terminal_geometry::{
 };
 #[cfg(unix)]
 use terminal_geometry::{reported_cell_size_from_events, store_reported_cell_size};
+pub use terminal_sessions::{run_terminal_session_control, run_terminal_session_observe};
 use terminal_setup::{
     effective_mouse_capture, effective_sgr_pixel_mouse, set_mouse_capture,
     setup_direct_attach_terminal, setup_terminal, should_draw_host_cursor,
@@ -138,6 +137,7 @@ fn run_client_with_mode(
     attach_request: Option<(String, bool)>,
     attach_escape: Option<AttachEscapeState>,
     log_message: &'static str,
+    launch_options: ClientLaunchOptions,
 ) -> io::Result<()> {
     init_logging();
 
@@ -158,6 +158,7 @@ fn run_client_with_mode(
             .with_startup_onboarding(loaded_config.config.should_show_onboarding())
             .with_keybinding_source(keybinding_source)
             .with_local_endpoint(&socket_path)
+            .with_launch_options(&launch_options)
     });
     let mouse_capture = loaded_config.config.ui.mouse_capture;
     let mouse_scroll_lines = loaded_config.config.ui.mouse_scroll_lines();
@@ -186,8 +187,7 @@ fn run_client_with_mode(
 
     crate::logging::startup("client");
     info!(path = %socket_path.display(), "{log_message}");
-
-    let endpoint_catalog = if client_rendered_shell && !is_remote_client_process() {
+    let mut endpoint_catalog = if client_rendered_shell && !is_remote_client_process() {
         endpoint::EndpointCatalog::load().unwrap_or_else(|error| {
             warn!(%error, "saved SSH endpoint catalog is unavailable");
             endpoint::EndpointCatalog::default()
@@ -195,6 +195,9 @@ fn run_client_with_mode(
     } else {
         endpoint::EndpointCatalog::default()
     };
+    if launch_options.workspace_id.is_some() {
+        endpoint_catalog.select_local();
+    }
     let federated = endpoint_catalog.has_enabled_ssh();
 
     let initial_stream = match crate::ipc::connect_local_stream(&socket_path) {
@@ -1670,6 +1673,13 @@ async fn run_client_loop(
                                 }
                             },
                         );
+                        if let Some(error) = state
+                            .shell
+                            .as_mut()
+                            .and_then(shell::ClientShellState::take_launch_target_error)
+                        {
+                            return Err(ClientError::LaunchTarget(error));
+                        }
                         if let Some(shell) = state.shell.as_mut() {
                             shell.reconcile_input_source();
                         }
@@ -1867,7 +1877,7 @@ async fn run_client_loop(
                                 })
                             })
                             .flatten();
-                        install_client_shell_snapshot(
+                        let launch_actions = install_client_shell_snapshot(
                             &mut state,
                             &endpoint_id,
                             snapshot,
@@ -1875,6 +1885,16 @@ async fn run_client_loop(
                             &mut write_stream,
                             &mut prefix_input_source,
                         )?;
+                        if !launch_actions.is_empty() {
+                            dispatch_client_shell_actions(
+                                launch_actions,
+                                &mut endpoint_commands,
+                                &mut write_stream,
+                                state.shell.as_mut(),
+                                &mut state.detached_process_children,
+                                &event_tx,
+                            )?;
+                        }
                         if matches!(
                             activation_progress,
                             Some(endpoint::SurfaceActivationProgress::Ready)
@@ -2020,6 +2040,9 @@ async fn run_client_loop(
                             );
                             outcome.repaint |= repaint;
                             outcome.actions.extend(actions);
+                        }
+                        if let Some(error) = shell.take_launch_target_error() {
+                            return Err(ClientError::LaunchTarget(error));
                         }
                         let (effects, notification_repaint) = shell.tick_notifications(now);
                         outcome.repaint |= notification_repaint | shell.tick_copy_feedback(now);

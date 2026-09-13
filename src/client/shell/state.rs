@@ -68,6 +68,14 @@ pub(crate) enum ClientShellKeybindingSource {
     Endpoint,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ClientShellLaunchTarget {
+    pub(super) workspace_id: String,
+    pub(super) pane_id: Option<String>,
+    pub(super) requested_boot_id: Option<String>,
+    pub(super) requested_generation: Option<u64>,
+}
+
 pub(crate) struct ClientShellConfig {
     pub(super) sidebar_width: u16,
     pub(super) sidebar_min_width: u16,
@@ -109,6 +117,8 @@ pub(crate) struct ClientShellConfig {
     pub(super) preferences: preferences::ClientChromePreferences,
     pub(super) startup_config_diagnostic: Option<String>,
     pub(super) startup_onboarding: bool,
+    pub(super) launch_target: Option<ClientShellLaunchTarget>,
+    pub(super) launch_hide_sidebar: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -684,6 +694,7 @@ impl ClientShellOverlay {
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
     Generic,
+    StartupTarget,
     ProductAnnouncementDismiss {
         version: String,
         id: String,
@@ -991,6 +1002,8 @@ pub(crate) struct ClientShellState {
     pub(super) config_diagnostic: Option<String>,
     pub(super) endpoint_error: Option<String>,
     pub(super) dismissed_product_announcement: Option<(String, String)>,
+    pub(super) launch_sidebar_override_active: bool,
+    pub(super) launch_target_error: Option<String>,
 }
 
 pub(super) fn product_announcement_state(
@@ -1031,9 +1044,13 @@ impl ClientShellState {
         let overlay = config
             .startup_onboarding
             .then_some(ClientShellOverlay::Onboarding);
-        let sidebar_collapsed = preferences
-            .sidebar_collapsed
-            .unwrap_or(config.sidebar_start_collapsed);
+        let sidebar_collapsed = if config.launch_hide_sidebar {
+            true
+        } else {
+            preferences
+                .sidebar_collapsed
+                .unwrap_or(config.sidebar_start_collapsed)
+        };
         let (min_width, max_width) = crate::config::validated_sidebar_bounds(
             config.sidebar_min_width,
             config.sidebar_max_width,
@@ -1048,6 +1065,7 @@ impl ClientShellState {
             .filter(|split| split.is_finite())
             .map(|split| split.clamp(0.1, 0.9))
             .unwrap_or(0.5);
+        let launch_sidebar_override_active = config.launch_hide_sidebar;
         if let Some(sort) = preferences.agent_panel_sort {
             config.agent_panel_sort = sort;
         }
@@ -1135,6 +1153,8 @@ impl ClientShellState {
             local_config_diagnostic,
             endpoint_error: None,
             dismissed_product_announcement: None,
+            launch_sidebar_override_active,
+            launch_target_error: None,
         }
     }
 

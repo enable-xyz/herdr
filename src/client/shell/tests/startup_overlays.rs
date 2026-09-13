@@ -1294,3 +1294,94 @@ fn client_settings_preview_restore_and_endpoint_integrations_are_owned_by_overla
         })) if integration_messages == &["installed codex"]
     ));
 }
+
+#[test]
+fn launch_target_waits_for_snapshot_then_uses_connection_endpoint_lane() {
+    let options = crate::client::ClientLaunchOptions {
+        workspace_id: Some("ws_1".into()),
+        pane_id: Some("pane_1".into()),
+        hide_sidebar: true,
+    };
+    let config = ClientShellConfig::from_config(&Config::default()).with_launch_options(&options);
+    assert_eq!(config.initial_surface_size(100, 30).cols, 100);
+    let mut state = ClientShellState::new(config);
+    assert!(state.sidebar_collapsed);
+    assert!(!state.sidebar_collapsed_manual);
+    assert!(state
+        .handle_input_bytes(b"must not leak")
+        .requests
+        .is_empty());
+
+    let mut projected = snapshot();
+    projected.focused_workspace_id = None;
+    projected.focused_tab_id = None;
+    projected.focused_pane_id = None;
+    state.set_snapshot(Box::new(projected.clone()));
+    let actions = state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap();
+    assert!(matches!(
+        actions.as_slice(),
+        [ClientShellAction::Endpoint {
+            endpoint_id: ClientEndpointId::Local,
+            boot_id,
+            request,
+        }] if boot_id == "boot-1"
+            && matches!(
+                request.method,
+                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                    ref pane_id
+                }) if pane_id == "pane_1"
+            )
+    ));
+    assert!(state.launch_target_pending());
+    state.set_pane_surface(surface());
+    assert!(
+        state.compose(100, 30).is_none(),
+        "no compose route may expose the unrelated pre-target surface"
+    );
+    assert!(state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap()
+        .is_empty());
+    let retry = state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 2)
+        .unwrap();
+    assert!(
+        matches!(retry.as_slice(), [ClientShellAction::Endpoint { boot_id, .. }] if boot_id == "boot-1"),
+        "a replacement endpoint generation must receive its own target request"
+    );
+
+    projected.revision = 2;
+    projected.focused_workspace_id = Some("ws_1".into());
+    projected.focused_tab_id = Some("tab_1".into());
+    projected.focused_pane_id = Some("pane_1".into());
+    state.set_snapshot(Box::new(projected.clone()));
+    assert!(state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap()
+        .is_empty());
+    assert!(!state.launch_target_pending());
+}
+
+#[test]
+fn launch_target_refuses_a_pane_from_another_workspace() {
+    let options = crate::client::ClientLaunchOptions {
+        workspace_id: Some("ws_2".into()),
+        pane_id: Some("pane_1".into()),
+        hide_sidebar: false,
+    };
+    let config = ClientShellConfig::from_config(&Config::default()).with_launch_options(&options);
+    let mut state = ClientShellState::new(config);
+    let mut projected = snapshot();
+    let mut second = projected.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    projected.workspaces.push(second);
+
+    assert_eq!(
+        state
+            .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+            .unwrap_err(),
+        "requested pane pane_1 does not belong to workspace ws_2"
+    );
+}

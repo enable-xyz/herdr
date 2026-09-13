@@ -16,6 +16,8 @@ pub enum ClientError {
     ConnectionLost(io::Error),
     /// Protocol error (framing, deserialization).
     Protocol(protocol::FramingError),
+    /// The requested initial client-shell target was absent, stale, or rejected.
+    LaunchTarget(String),
 }
 
 impl std::fmt::Display for ClientError {
@@ -70,6 +72,7 @@ impl std::fmt::Display for ClientError {
                 }
             }
             ClientError::Protocol(err) => write!(f, "protocol error: {err}"),
+            ClientError::LaunchTarget(err) => write!(f, "client launch target unavailable: {err}"),
         }
     }
 }

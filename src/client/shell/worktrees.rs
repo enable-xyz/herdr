@@ -532,6 +532,9 @@ impl ClientShellState {
                     Some("endpoint returned an unexpected worktree result".to_owned());
                 true
             }
+            (PendingEndpointKind::StartupTarget, Err(_)) => {
+                unreachable!("startup target results are handled before worktree dispatch")
+            }
             (
                 PendingEndpointKind::Generic
                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }
