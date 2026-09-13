@@ -85,6 +85,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) workspace_open_command: Option<String>,
     pub(super) workspace_open_command_title: String,
     pub(super) mobile_width_threshold: u16,
+    pub(super) content_margins: bool,
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
     pub(super) spaces: SpacesSidebarConfig,

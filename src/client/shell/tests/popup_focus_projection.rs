@@ -178,6 +178,78 @@ fn desktop_composition_keeps_shell_outside_origin_relative_surface() {
 }
 
 #[test]
+fn content_margins_translate_bottom_pane_cursor_and_mouse_input() {
+    let mut config = Config::default();
+    config.ui.content_margins = true;
+    config.ui.sidebar_start_collapsed = true;
+    config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+    config.ui.tab_bar_position = TabBarPositionConfig::Bottom;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+
+    let frame = state.compose(140, 20).expect("margin frame");
+    let layout = state.layout(140, 20);
+    assert_eq!(layout.tab_bar, Rect::new(0, 19, 140, 1));
+    assert_eq!(layout.pane_surface, Rect::new(10, 1, 120, 17));
+    assert_eq!(
+        frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
+        Some((11, 2))
+    );
+    assert_eq!(state.hits.panes[0].inner_rect, Rect::new(10, 1, 4, 2));
+
+    let margin =
+        state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 0,
+            row: 1,
+            modifiers: KeyModifiers::empty(),
+        })]);
+    assert!(margin.requests.is_empty());
+
+    let pane = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 12,
+        row: 2,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        &pane.requests[..],
+        [ClientMessage::ClientShellPaneInput { events, .. }]
+            if matches!(
+                &events[..],
+                [ClientPaneInputEvent::Mouse {
+                    position: ClientMousePosition::Cell { column: 2, row: 1 },
+                    ..
+                }]
+            )
+    ));
+}
+
+#[test]
+fn content_margins_center_popup_and_translate_its_cursor() {
+    let mut config = Config::default();
+    config.ui.content_margins = true;
+    config.ui.sidebar_start_collapsed = true;
+    config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+    config.ui.tab_bar_position = TabBarPositionConfig::Bottom;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface_with_popup());
+
+    let frame = state.compose(140, 20).expect("margin popup frame");
+    let popup = state.hits.popup.as_ref().expect("popup hit");
+    assert_eq!(popup.rect, Rect::new(64, 7, 12, 5));
+    assert_eq!(popup.inner_rect, Rect::new(65, 8, 9, 3));
+    assert_eq!(
+        frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
+        Some((67, 9))
+    );
+}
+
+#[test]
 fn client_composes_popup_terminal_content_inside_client_owned_chrome() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     state.set_snapshot(Box::new(snapshot()));

@@ -302,6 +302,8 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
+Set `content_margins = true` under `[ui]` to add breathing room around terminal content without shrinking the native tab row or sidebar. On desktop, the pane content stays centered at no more than 120 columns, with a smaller minimum margin beside a visible sidebar and a larger one when the sidebar is hidden. Margins shrink to preserve at least 80 content columns, disappear at 80 columns and below and in the mobile layout, and add one row above and below when the available pane surface is at least 12 rows tall. The default is `false`.
+
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:
