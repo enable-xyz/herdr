@@ -1991,6 +1991,7 @@ impl ClientShellState {
                 }
                 if super::contains(self.hits.sidebar_toggle, point) {
                     self.sidebar_collapsed = !self.sidebar_collapsed;
+                    self.launch_sidebar_override_active = false;
                     self.sidebar_collapsed_manual = true;
                     self.invalidate_pane_surface();
                     outcome.repaint = true;

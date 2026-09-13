@@ -81,6 +81,42 @@ fn manual_client_chrome_preferences_round_trip_per_endpoint() {
 }
 
 #[test]
+fn launch_hidden_override_does_not_persist_through_unrelated_chrome_writes() {
+    let path = std::env::temp_dir().join(format!(
+        "herdr-client-shell-launch-prefs-{}.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut baseline = ClientShellState::new(
+        ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone()),
+    );
+    baseline.sidebar_collapsed = false;
+    baseline.sidebar_collapsed_manual = true;
+    baseline.persist_chrome_preferences(&mut ClientShellInput::default());
+
+    let options = crate::client::ClientLaunchOptions {
+        hide_sidebar: true,
+        ..Default::default()
+    };
+    let mut launched = ClientShellState::new(
+        ClientShellConfig::from_config(&Config::default())
+            .with_preferences_path(path.clone())
+            .with_launch_options(&options),
+    );
+    assert!(launched.sidebar_collapsed);
+    launched.sidebar_width = 31;
+    launched.sidebar_width_manual = true;
+    launched.persist_chrome_preferences(&mut ClientShellInput::default());
+
+    let reloaded = ClientShellState::new(
+        ClientShellConfig::from_config(&Config::default()).with_preferences_path(path.clone()),
+    );
+    assert!(!reloaded.sidebar_collapsed);
+    assert!(reloaded.sidebar_collapsed_manual);
+    std::fs::remove_file(path).expect("remove launch chrome preferences");
+}
+
+#[test]
 fn tab_bar_renders_endpoint_status_ellipses_and_clamps_to_useful_scroll() {
     let mut projected = snapshot();
     projected.tab_bar_right = vec![

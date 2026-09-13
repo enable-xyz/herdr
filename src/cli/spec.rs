@@ -29,6 +29,7 @@ pub(super) fn command() -> Command {
                 .help("Print version and exit"),
         )
         .subcommand(completion::command())
+        .subcommand(client_command())
         .subcommand(update_command())
         .subcommand(status_command())
         .subcommand(config_command())
@@ -110,6 +111,21 @@ fn write_requested_help(
     selected.write_long_help(&mut *output)?;
     writeln!(output)?;
     Ok(true)
+}
+
+fn client_command() -> Command {
+    Command::new("client")
+        .about("Connect only to an already-running Herdr server")
+        .arg(
+            option("workspace", "ID")
+                .help("Focus an existing workspace after the initial snapshot"),
+        )
+        .arg(
+            option("pane", "ID")
+                .requires("workspace")
+                .help("Focus an existing pane in --workspace"),
+        )
+        .arg(flag("hide-sidebar").help("Start with the client-local sidebar hidden"))
 }
 
 fn update_command() -> Command {

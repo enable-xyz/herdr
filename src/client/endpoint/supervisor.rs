@@ -323,6 +323,9 @@ fn handshake_error(error: crate::client::ClientError) -> std::io::Error {
         ClientError::Protocol(error) => {
             std::io::Error::new(std::io::ErrorKind::InvalidData, error.to_string())
         }
+        ClientError::LaunchTarget(error) => {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, error)
+        }
         ClientError::ServerShutdown { reason } => std::io::Error::new(
             std::io::ErrorKind::ConnectionAborted,
             reason.unwrap_or_else(|| "server shut down during handshake".into()),

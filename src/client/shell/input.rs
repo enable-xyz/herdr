@@ -154,6 +154,9 @@ impl ClientShellState {
     }
 
     pub(super) fn handle_raw_events(&mut self, events: Vec<RawInputEvent>) -> ClientShellInput {
+        if self.launch_target_pending() {
+            return ClientShellInput::default();
+        }
         let mut outcome = ClientShellInput::default();
         if !events.is_empty() && self.endpoint_error.take().is_some() {
             outcome.repaint = true;

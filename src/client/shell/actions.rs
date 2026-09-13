@@ -2,7 +2,10 @@ use super::*;
 
 impl ClientShellState {
     fn set_sidebar_collapsed(&mut self, collapsed: bool, outcome: &mut ClientShellInput) {
-        if self.sidebar_collapsed == collapsed && self.sidebar_collapsed_manual {
+        let launch_override = self.launch_sidebar_override_active;
+        self.launch_sidebar_override_active = false;
+        if self.sidebar_collapsed == collapsed && self.sidebar_collapsed_manual && !launch_override
+        {
             return;
         }
         if self.sidebar_collapsed != collapsed {
@@ -496,6 +499,87 @@ impl ClientShellState {
         outcome.actions
     }
 
+    pub(crate) fn prepare_launch_target(
+        &mut self,
+        endpoint_id: &ClientEndpointId,
+        snapshot: &ClientShellSnapshot,
+        generation: u64,
+    ) -> Result<Vec<ClientShellAction>, String> {
+        if endpoint_id != &ClientEndpointId::Local {
+            return Ok(Vec::new());
+        }
+        let Some(target) = self.config.launch_target.clone() else {
+            return Ok(Vec::new());
+        };
+        if !snapshot
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.workspace_id == target.workspace_id)
+        {
+            return Err(format!(
+                "requested workspace {} is not available",
+                target.workspace_id
+            ));
+        }
+        if let Some(pane_id) = target.pane_id.as_deref() {
+            let pane = snapshot
+                .panes
+                .iter()
+                .find(|pane| pane.pane_id == pane_id)
+                .ok_or_else(|| format!("requested pane {pane_id} is not available"))?;
+            if pane.workspace_id != target.workspace_id {
+                return Err(format!(
+                    "requested pane {pane_id} does not belong to workspace {}",
+                    target.workspace_id
+                ));
+            }
+        }
+        let focused = match target.pane_id.as_deref() {
+            Some(pane_id) => snapshot.focused_pane_id.as_deref() == Some(pane_id),
+            None => snapshot.focused_workspace_id.as_deref() == Some(target.workspace_id.as_str()),
+        };
+        if focused {
+            self.config.launch_target = None;
+            return Ok(Vec::new());
+        }
+        if target.requested_boot_id.as_deref() == Some(snapshot.boot_id.as_str())
+            && target.requested_generation == Some(generation)
+        {
+            return Ok(Vec::new());
+        }
+        if let Some(target) = self.config.launch_target.as_mut() {
+            target.requested_boot_id = Some(snapshot.boot_id.clone());
+            target.requested_generation = Some(generation);
+        }
+        let method = match target.pane_id {
+            Some(pane_id) => {
+                crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id })
+            }
+            None => {
+                crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+                    workspace_id: target.workspace_id,
+                })
+            }
+        };
+        let mut outcome = ClientShellInput::default();
+        if !self.push_endpoint_method_with_kind(
+            method,
+            PendingEndpointKind::StartupTarget,
+            &mut outcome,
+        ) {
+            return Err("requested client target is not ready".into());
+        }
+        Ok(outcome.actions)
+    }
+
+    pub(crate) fn launch_target_pending(&self) -> bool {
+        self.config.launch_target.is_some()
+    }
+
+    pub(crate) fn take_launch_target_error(&mut self) -> Option<String> {
+        self.launch_target_error.take()
+    }
+
     pub(crate) fn cancel_endpoint_request(&mut self, request_id: &str) -> bool {
         let Some(pending) = self.pending_requests.get(request_id) else {
             return false;
@@ -578,6 +662,15 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::StartupTarget => {
+                if let Err(error) = result {
+                    self.launch_target_error = Some(format!(
+                        "could not focus requested client target: {}",
+                        error.message
+                    ));
+                }
+                return (false, Vec::new());
+            }
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
                     Ok(_) => (false, Vec::new()),

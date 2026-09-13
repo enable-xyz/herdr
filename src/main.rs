@@ -553,11 +553,36 @@ fn main() -> io::Result<()> {
         return server::headless::run_server();
     }
 
-    // Hidden client mode: connect to an existing server's client socket.
+    // Explicit client mode only connects to an already-running server. It never starts or
+    // restores a server, which makes it safe for additional native windows.
     if args.get(1).map(|s| s.as_str()) == Some("client") {
+        if args[2..]
+            .iter()
+            .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+        {
+            platform::begin_cli_output();
+            println!("Usage: herdr client [--workspace <id> [--pane <id>]] [--hide-sidebar]");
+            println!();
+            println!("Connect a native client shell to an already-running Herdr session.");
+            println!();
+            println!("Options:");
+            println!("  --workspace <id>  Focus an existing workspace after the initial snapshot");
+            println!("  --pane <id>       Focus an existing pane in --workspace");
+            println!("  --hide-sidebar    Start with the client-local sidebar hidden");
+            println!("  --help, -h        Show this help");
+            return Ok(());
+        }
+        let options = match client::parse_client_launch_args(&args[2..]) {
+            Ok(options) => options,
+            Err(err) => {
+                eprintln!("error: {err}");
+                eprintln!("usage: herdr client [--workspace <id> [--pane <id>]] [--hide-sidebar]");
+                std::process::exit(2);
+            }
+        };
         let loaded_config = config::Config::load();
         exit_if_nested_disabled(&loaded_config.config);
-        return client::run_client();
+        return client::run_client(options);
     }
 
     if args.get(1).map(|s| s.as_str()) == Some("update") {
@@ -682,10 +707,17 @@ fn main() -> io::Result<()> {
         println!();
         println!("Advanced commands:");
         println!("  {:<32} Run as headless server", "herdr server");
+        println!(
+            "  {:<32} Connect only to an existing server",
+            "herdr client [options]"
+        );
         println!();
         println!("Options:");
         println!("  --session <name>    Use or create a named persistent session");
         println!("  --remote <target>   Attach through SSH to a remote Herdr server");
+        println!("  --workspace <id>  Client launch target (requires `herdr client`)");
+        println!("  --pane <id>       Exact pane launch target (requires --workspace)");
+        println!("  --hide-sidebar    Start a client with its sidebar hidden");
         println!("  --remote-keybindings <local|server>");
         println!("                      Keybindings for --remote app attach (default: local)");
         println!("  --handoff           Opt into live handoff for update or remote attach");
