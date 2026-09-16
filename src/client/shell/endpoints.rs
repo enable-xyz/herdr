@@ -9,7 +9,6 @@ pub(crate) struct ClientShellEndpoint {
     /// Connection generation that produced `snapshot`. `None` is reserved for local tests.
     pub(crate) snapshot_generation: Option<u64>,
     pub(crate) agent_recency: HashMap<String, u64>,
-    pub(super) agent_presentation: super::endpoint_agent_state::EndpointAgentPresentation,
     pub(crate) methods: Option<HashSet<String>>,
 }
 
@@ -60,9 +59,6 @@ impl ClientShellState {
                 agent_recency: previous
                     .map(|endpoint| endpoint.agent_recency.clone())
                     .unwrap_or_default(),
-                agent_presentation: previous
-                    .map(|endpoint| endpoint.agent_presentation.clone())
-                    .unwrap_or_default(),
                 methods: previous.and_then(|endpoint| endpoint.methods.clone()),
             });
         }
@@ -101,7 +97,6 @@ impl ClientShellState {
             endpoint.snapshot_generation = None;
             endpoint.methods = None;
             endpoint.agent_recency.clear();
-            endpoint.agent_presentation = Default::default();
         }
     }
 
@@ -314,7 +309,7 @@ impl ClientShellState {
         endpoint_id: &ClientEndpointId,
         snapshot: Box<ClientShellSnapshot>,
     ) {
-        self.cache_endpoint_snapshot_with_surface(endpoint_id, None, snapshot, true);
+        self.cache_endpoint_snapshot_inner(endpoint_id, None, snapshot);
     }
 
     pub(crate) fn cache_endpoint_snapshot_for_generation(
@@ -323,26 +318,14 @@ impl ClientShellState {
         generation: u64,
         snapshot: Box<ClientShellSnapshot>,
     ) {
-        self.cache_endpoint_snapshot_with_surface(endpoint_id, Some(generation), snapshot, true);
+        self.cache_endpoint_snapshot_inner(endpoint_id, Some(generation), snapshot);
     }
 
-    /// Metadata delivered while an endpoint surface is inactive must never advance this
-    /// aggregate client's viewed watermark, even if the frozen source frame still exists.
-    pub(crate) fn cache_endpoint_snapshot_inactive_for_generation(
-        &mut self,
-        endpoint_id: &ClientEndpointId,
-        generation: u64,
-        snapshot: Box<ClientShellSnapshot>,
-    ) {
-        self.cache_endpoint_snapshot_with_surface(endpoint_id, Some(generation), snapshot, false);
-    }
-
-    fn cache_endpoint_snapshot_with_surface(
+    fn cache_endpoint_snapshot_inner(
         &mut self,
         endpoint_id: &ClientEndpointId,
         generation: Option<u64>,
         mut snapshot: Box<ClientShellSnapshot>,
-        acknowledge_surface: bool,
     ) {
         snapshot
             .commands
@@ -370,19 +353,6 @@ impl ClientShellState {
             .is_some_and(|previous| previous.boot_id != snapshot.boot_id);
         if boot_changed {
             self.retire_endpoint_notifications(endpoint_id);
-        }
-        self.endpoints[index]
-            .agent_presentation
-            .project_snapshot(&mut snapshot);
-        let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
-            self.pane_surface.as_ref()
-        } else {
-            None
-        };
-        if let Some(surface) = presented_surface {
-            self.endpoints[index]
-                .agent_presentation
-                .acknowledge_surface(&mut snapshot, surface, self.outer_focused);
         }
         let previous = self.endpoints[index].snapshot.as_deref();
         let mut next_recency = self
@@ -419,29 +389,6 @@ impl ClientShellState {
         endpoint.agent_recency = recency;
         endpoint.snapshot_generation = generation;
         endpoint.snapshot = Some(snapshot);
-    }
-
-    pub(crate) fn acknowledge_active_surface_agents(&mut self, surface: &PaneSurfaceFrame) -> bool {
-        let Some(index) = self
-            .endpoints
-            .iter()
-            .position(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
-        else {
-            return false;
-        };
-        let changed = {
-            let endpoint = &mut self.endpoints[index];
-            let Some(snapshot) = endpoint.snapshot.as_deref_mut() else {
-                return false;
-            };
-            endpoint
-                .agent_presentation
-                .acknowledge_surface(snapshot, surface, self.outer_focused)
-        };
-        if changed {
-            self.snapshot = self.endpoints[index].snapshot.clone();
-        }
-        changed
     }
 
     #[cfg(test)]
@@ -500,7 +447,6 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         snapshot: None,
         snapshot_generation: None,
         agent_recency: HashMap::new(),
-        agent_presentation: Default::default(),
         methods: None,
     }
 }

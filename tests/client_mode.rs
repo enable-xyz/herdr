@@ -1313,6 +1313,123 @@ fn configured_window_title_tracks_all_tokens_and_focused_osc_only() {
     cleanup_spawned_herdr(client, base);
 }
 
+#[test]
+fn window_titles_follow_each_clients_thread_after_other_sidebar_navigation() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+    let server = spawn_server_with_config(
+        &config_home,
+        &runtime_dir,
+        &api_socket,
+        &client_socket,
+        "onboarding = false\n[ui]\nwindow_title = \"Thread: {workspace}\"\n[keys]\nswitch_workspace = \"alt+1..9\"\n",
+    );
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    wait_for_socket(&client_socket, Duration::from_secs(10));
+    let workspaces = ["A", "B", "C"].map(|label| {
+        let response = send_json_request(
+            &api_socket,
+            &serde_json::json!({
+                "id": label,
+                "method": "workspace.create",
+                "params": {"cwd": base, "label": label, "focus": true},
+            })
+            .to_string(),
+        );
+        response["result"]["workspace"]["workspace_id"]
+            .as_str()
+            .expect("created workspace")
+            .to_owned()
+    });
+    let attach = |workspace: &str| {
+        let client = spawn_client_process_with_args(
+            &config_home,
+            &runtime_dir,
+            &api_socket,
+            &["client", "--workspace", workspace],
+        );
+        let master = client._master.as_ref().unwrap();
+        let output = spawn_pty_drain(master.try_clone_reader().unwrap());
+        let input = master.take_writer().unwrap();
+        (client, output, input)
+    };
+    let (first, first_output, mut first_input) = attach(&workspaces[0]);
+    wait_for_window_title(&first_output, "Thread: A");
+    first_input.write_all(b"\x1b[O").unwrap();
+    let (second, second_output, mut second_input) = attach(&workspaces[1]);
+    wait_for_window_title(&second_output, "Thread: B");
+    let wait_for_new_title = |output: &SharedOutput, previous: usize, expected: &str| {
+        assert!(
+            wait_until(Duration::from_secs(5), Duration::from_millis(20), || {
+                let titles = captured_window_titles(output);
+                titles.len() > previous && titles.last().map(String::as_str) == Some(expected)
+            }),
+            "expected a fresh {expected:?} title; got {:?}",
+            captured_window_titles(output)
+        );
+    };
+
+    second_input.write_all(b"\x1b[O").unwrap();
+    let previous = captured_window_titles(&first_output).len();
+    first_input.write_all(b"\x1b[I").unwrap();
+    wait_for_new_title(&first_output, previous, "Thread: A");
+    let previous = captured_window_titles(&first_output).len();
+    first_input.write_all(b"\x1b3").unwrap();
+    wait_for_new_title(&first_output, previous, "Thread: C");
+
+    first_input.write_all(b"\x1b[O").unwrap();
+    let previous = captured_window_titles(&second_output).len();
+    second_input.write_all(b"\x1b[I").unwrap();
+    wait_for_new_title(&second_output, previous, "Thread: B");
+    assert_eq!(
+        captured_window_titles(&first_output)
+            .last()
+            .map(String::as_str),
+        Some("Thread: C")
+    );
+    let previous = captured_window_titles(&second_output).len();
+    second_input.write_all(b"\x1b1").unwrap();
+    wait_for_new_title(&second_output, previous, "Thread: A");
+
+    second_input.write_all(b"\x1b[O").unwrap();
+    let previous = captured_window_titles(&first_output).len();
+    first_input.write_all(b"\x1b[I").unwrap();
+    wait_for_new_title(&first_output, previous, "Thread: C");
+    assert_eq!(
+        captured_window_titles(&second_output)
+            .last()
+            .map(String::as_str),
+        Some("Thread: A")
+    );
+
+    // The focus report and navigation key can arrive in the same terminal read.
+    first_input.write_all(b"\x1b[O").unwrap();
+    let previous = captured_window_titles(&first_output).len();
+    first_input.write_all(b"\x1b[I\x1b2").unwrap();
+    wait_for_new_title(&first_output, previous, "Thread: B");
+    first_input.write_all(b"\x1b[O").unwrap();
+    let previous = captured_window_titles(&second_output).len();
+    second_input.write_all(b"\x1b[I").unwrap();
+    wait_for_new_title(&second_output, previous, "Thread: A");
+    assert_eq!(
+        captured_window_titles(&first_output)
+            .last()
+            .map(String::as_str),
+        Some("Thread: B"),
+        "batched focus must not navigate back to the old thread"
+    );
+    drop(first_input);
+    drop(second_input);
+    drop(first);
+    drop(second);
+    drop(server);
+    cleanup_test_base(&base);
+}
+
 /// Polls until the client exits, then returns only the output captured after
 /// the `since` byte watermark. Panics if the client does not exit within the
 /// deadline.

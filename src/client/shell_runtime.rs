@@ -25,6 +25,15 @@ pub(super) fn dispatch_client_shell_actions(
                     repaint |= shell.cancel_endpoint_request(&request.id);
                 }
             }
+            shell::ClientShellAction::HostFocusGained => {
+                if endpoints.active_surface_available() {
+                    write_to_server(
+                        endpoints,
+                        &ClientMessage::ClientShellFocus { focused: true },
+                    )
+                    .map_err(ClientError::ConnectionLost)?;
+                }
+            }
             shell::ClientShellAction::ClipboardWrite(bytes) => {
                 crate::selection::write_osc52_bytes(&bytes);
             }
@@ -572,7 +581,7 @@ pub(super) fn install_client_shell_snapshot(
         let launch_snapshot = project_snapshot.then(|| snapshot.clone());
         let launch_actions = if project_snapshot {
             shell.set_endpoint_snapshot_for_generation(endpoint_id, generation, snapshot);
-            shell
+            let mut actions = shell
                 .prepare_launch_target(
                     endpoint_id,
                     launch_snapshot
@@ -580,13 +589,11 @@ pub(super) fn install_client_shell_snapshot(
                         .expect("projected snapshot was retained for launch targeting"),
                     generation,
                 )
-                .map_err(ClientError::LaunchTarget)?
+                .map_err(ClientError::LaunchTarget)?;
+            actions.extend(shell.retry_host_focus());
+            actions
         } else {
-            shell.cache_endpoint_snapshot_inactive_for_generation(
-                endpoint_id,
-                generation,
-                snapshot,
-            );
+            shell.cache_endpoint_snapshot_for_generation(endpoint_id, generation, snapshot);
             Vec::new()
         };
         let graphics_cleanup = shell.take_pending_graphics_cleanup();
@@ -724,6 +731,25 @@ pub(super) fn finish_client_shell_input(
                 continue;
             }
             if active_endpoint_online {
+                // Scoped commands establish this client's context before older servers process
+                // host focus. Reuse queued navigation rather than reasserting its stale origin.
+                if focused {
+                    if let Some(actions) = state
+                        .shell
+                        .as_mut()
+                        .and_then(shell::ClientShellState::prepare_host_focus)
+                    {
+                        dispatch_client_shell_actions(
+                            actions,
+                            endpoint_commands,
+                            endpoints,
+                            state.shell.as_mut(),
+                            &mut state.detached_process_children,
+                            event_tx,
+                        )?;
+                        continue;
+                    }
+                }
                 write_to_server(endpoints, &ClientMessage::ClientShellFocus { focused })
                     .map_err(ClientError::ConnectionLost)?;
             }

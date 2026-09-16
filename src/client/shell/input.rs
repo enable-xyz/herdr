@@ -239,15 +239,13 @@ impl ClientShellState {
                     self.outer_focused = Some(true);
                     outcome.query_host_appearance = true;
                     outcome.repaint |= self.config.redraw_on_focus_gained;
-                    if let Some(surface) = self.pane_surface.clone() {
-                        outcome.repaint |= self.acknowledge_active_surface_agents(&surface);
-                    }
                     outcome
                         .requests
                         .push(ClientMessage::ClientShellFocus { focused: true });
                 }
                 RawInputEvent::OuterFocusLost => {
                     self.outer_focused = Some(false);
+                    self.host_focus_pending = false;
                     self.release_input_leases(&mut outcome);
                     outcome
                         .requests
