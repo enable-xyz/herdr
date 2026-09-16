@@ -572,6 +572,35 @@ impl ClientShellState {
         Ok(outcome.actions)
     }
 
+    pub(crate) fn prepare_host_focus(&mut self) -> Option<Vec<ClientShellAction>> {
+        if self.outer_focused != Some(true) {
+            return Some(Vec::new());
+        }
+        self.host_focus_pending = true;
+        // Already queued commands establish this client's current server context. Do not append
+        // a focus request using a snapshot that predates their navigation.
+        if !self.pending_requests.is_empty() {
+            return Some(Vec::new());
+        }
+        let snapshot = self.snapshot.as_deref()?;
+        let tab_id = snapshot.focused_tab_id.clone()?;
+        let mut outcome = ClientShellInput::default();
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::TabFocus(crate::api::schema::TabTarget { tab_id }),
+            PendingEndpointKind::Generic,
+            &mut outcome,
+        )
+        .then_some(outcome.actions)
+    }
+
+    pub(crate) fn retry_host_focus(&mut self) -> Vec<ClientShellAction> {
+        if self.host_focus_pending && self.pending_requests.is_empty() {
+            self.prepare_host_focus().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub(crate) fn launch_target_pending(&self) -> bool {
         self.config.launch_target.is_some()
     }
@@ -601,6 +630,54 @@ impl ClientShellState {
     }
 
     pub(crate) fn handle_endpoint_result(
+        &mut self,
+        boot_id: &str,
+        request_id: &str,
+        result: Result<crate::api::schema::ResponseResult, ClientShellEndpointError>,
+    ) -> (bool, Vec<ClientShellAction>) {
+        let current_request = self
+            .pending_requests
+            .get(request_id)
+            .is_some_and(|pending| {
+                pending.boot_id == boot_id
+                    && self
+                        .snapshot
+                        .as_deref()
+                        .is_some_and(|snapshot| snapshot.boot_id == boot_id)
+            });
+        // Ordinary method errors still follow server-side client-context selection. Transport
+        // and admission failures do not; retain the intent until another request or projection.
+        let synchronized = match &result {
+            Ok(_) => true,
+            Err(error) => error.code.as_deref().is_some_and(|code| {
+                !matches!(
+                    code,
+                    "endpoint_timeout"
+                        | "endpoint_cancelled"
+                        | "server_unavailable"
+                        | "endpoint_busy"
+                        | "stale_boot"
+                        | "surface_inactive"
+                        | "invalid_response"
+                        | "method_not_found"
+                        | "unsupported_endpoint_command"
+                )
+            }),
+        };
+        let (repaint, mut actions) = self.handle_endpoint_result_inner(boot_id, request_id, result);
+        if current_request
+            && synchronized
+            && self.host_focus_pending
+            && self.outer_focused == Some(true)
+            && self.pending_requests.is_empty()
+        {
+            self.host_focus_pending = false;
+            actions.push(ClientShellAction::HostFocusGained);
+        }
+        (repaint, actions)
+    }
+
+    fn handle_endpoint_result_inner(
         &mut self,
         boot_id: &str,
         request_id: &str,

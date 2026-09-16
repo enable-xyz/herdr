@@ -444,28 +444,92 @@ fn aggregate_priority_uses_client_observed_recency_across_machines() {
 }
 
 #[test]
-fn unselected_endpoint_completion_projects_done_client_side() {
+fn server_agent_status_updates_flow_to_aggregate_sidebar() {
     use crate::api::schema::AgentStatus;
+    use crate::config::{AgentSidebarToken, StatusIndicatorStyle};
 
-    let (mut state, endpoint_id) = state_with_remote();
+    let mut config = Config::default();
+    config.ui.status_indicators = StatusIndicatorStyle::Symbols;
+    config.ui.sidebar.agents.rows = vec![vec![
+        AgentSidebarToken::StateIcon,
+        AgentSidebarToken::Machine,
+        AgentSidebarToken::Agent,
+    ]];
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    let profile = remote_profile();
+    let endpoint_id = ClientEndpointId::Ssh(profile.id.clone());
+    state.set_endpoint_catalog(&[profile]);
+    state.set_endpoint_status(&endpoint_id, ClientEndpointStatus::Online);
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+
     let mut remote = snapshot();
     remote.boot_id = "remote-boot".into();
-    remote.agents = vec![agent("background agent", AgentStatus::Working, 2)];
-    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
     remote.revision = 2;
-    remote.agents = vec![agent("background agent", AgentStatus::Idle, 3)];
-
-    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
-
-    let status = state
+    remote.agents = vec![agent("shared agent", AgentStatus::Done, 7)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
+    let recency = state
+        .endpoints
+        .iter()
+        .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+        .and_then(|endpoint| endpoint.agent_recency.get("pane_1"))
+        .copied()
+        .expect("agent recency");
+    let frame_text = |state: &mut ClientShellState| {
+        let frame = state.compose(100, 28).expect("combined endpoint frame");
+        frame
+            .cells
+            .chunks(frame.width as usize)
+            .map(|row| {
+                row.iter()
+                    .map(|cell| cell.symbol.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let focus = state.handle_raw_events(vec![RawInputEvent::OuterFocusGained]);
+    assert!(matches!(
+        focus.requests.as_slice(),
+        [ClientMessage::ClientShellFocus { focused: true }]
+    ));
+    let focused_status = state
         .endpoints
         .iter()
         .find(|endpoint| endpoint.endpoint_id == endpoint_id)
         .and_then(|endpoint| endpoint.snapshot.as_deref())
         .and_then(|snapshot| snapshot.agents.first())
         .map(|agent| agent.agent_status);
-    assert_eq!(status, Some(AgentStatus::Done));
-    assert_eq!(state.active_endpoint_id, ClientEndpointId::Local);
+    assert_eq!(focused_status, Some(AgentStatus::Done));
+    assert!(
+        frame_text(&mut state).contains("✓ Build · shared agent"),
+        "server Done should reach the aggregate sidebar"
+    );
+
+    for (revision, status, indicator) in [
+        (3, AgentStatus::Idle, "○"),
+        (4, AgentStatus::Working, "◐"),
+        (5, AgentStatus::Blocked, "×"),
+    ] {
+        remote.revision = revision;
+        remote.agents = vec![agent("shared agent", status, 7)];
+        state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
+
+        let endpoint = state
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .expect("remote endpoint");
+        assert_eq!(
+            endpoint.snapshot.as_ref().unwrap().agents[0].agent_status,
+            status
+        );
+        assert_eq!(endpoint.agent_recency.get("pane_1"), Some(&recency));
+        assert!(
+            frame_text(&mut state).contains(&format!("{indicator} Build · shared agent")),
+            "server {status:?} should replace the previous sidebar status"
+        );
+    }
 }
 
 #[test]
@@ -569,13 +633,13 @@ fn new_connection_generation_accepts_a_lower_same_boot_projection_revision() {
     previous.boot_id = "shared-server-boot".into();
     previous.revision = 9;
     previous.workspaces[0].label = "old connection".into();
-    state.cache_endpoint_snapshot_inactive_for_generation(&endpoint_id, 4, Box::new(previous));
+    state.cache_endpoint_snapshot_for_generation(&endpoint_id, 4, Box::new(previous));
     let mut reconnected = snapshot();
     reconnected.boot_id = "shared-server-boot".into();
     reconnected.revision = 1;
     reconnected.workspaces[0].label = "new connection".into();
 
-    state.cache_endpoint_snapshot_inactive_for_generation(&endpoint_id, 5, Box::new(reconnected));
+    state.cache_endpoint_snapshot_for_generation(&endpoint_id, 5, Box::new(reconnected));
 
     let endpoint = state
         .endpoints

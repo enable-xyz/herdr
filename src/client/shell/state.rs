@@ -323,6 +323,7 @@ pub(crate) enum ClientShellAction {
         boot_id: String,
         request: Box<crate::api::schema::Request>,
     },
+    HostFocusGained,
     ClipboardWrite(Vec<u8>),
     OpenSafeWebUrl(String),
     ActivateEndpoint {
@@ -995,6 +996,7 @@ pub(crate) struct ClientShellState {
     pub(super) endpoint_notice_seen: HashSet<ClientEndpointNoticeKey>,
     pub(super) visible_endpoint_notice: Option<ClientVisibleEndpointNotice>,
     pub(super) outer_focused: Option<bool>,
+    pub(super) host_focus_pending: bool,
     pub(super) ascii_input_source_active: bool,
     pub(super) pending_input_source_changes: Vec<bool>,
     pub(super) host_appearance: Option<crate::terminal_theme::HostAppearance>,
@@ -1146,6 +1148,7 @@ impl ClientShellState {
             endpoint_notice_seen: HashSet::new(),
             visible_endpoint_notice: None,
             outer_focused: None,
+            host_focus_pending: false,
             ascii_input_source_active: false,
             pending_input_source_changes: Vec::new(),
             host_appearance: None,
@@ -1252,6 +1255,7 @@ impl ClientShellState {
         self.last_tab_bar_width = None;
         self.last_composed_size = None;
         self.pending_requests.clear();
+        self.host_focus_pending = false;
         self.pane_scroll_in_flight.clear();
         self.pane_scroll_queued.clear();
         self.pane_scroll_targets.clear();
@@ -1622,7 +1626,6 @@ impl ClientShellState {
         if surface.projection_revision != snapshot.revision {
             self.hits = ShellHitMap::default();
         }
-        self.acknowledge_active_surface_agents(&surface);
         let previous_popup = self.popup_terminal_id.clone();
         let next_popup = surface
             .popup

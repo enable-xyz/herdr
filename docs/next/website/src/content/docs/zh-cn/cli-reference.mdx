@@ -315,7 +315,7 @@ herdr agent explain --file PATH --agent LABEL [--json|--verbose]
 
 `agent prompt` 遵循当前的 bracketed paste 模式，即使智能体处于 working，也会将文本和延迟的 Enter 作为一次有序提交写入。不带 `--wait` 时，成功只确认写入完成，不代表轮次已经开始。Windows 上 Codex 的延迟随提示大小增加；调用方的超时包含提交时间。如果智能体已经是 `blocked`,它不会发送输入,而是返回 `agent_blocked`。使用 `--wait` 时,从其他非 working 状态接受的提示必须在提交后的最多五秒内产生可观察的 `working` 或 `blocked` 状态，否则 Herdr 返回 `agent_prompt_stalled`；如果调用方的超时先到期，则返回普通的 `timeout` 错误。这可防止无关的 `idle`、`done` 或会话变化错误地完成等待。观察到活动后，它会等待请求的第一个稳定状态。它不会跟踪单独的轮次。如果智能体已经处于 working，当前轮次的完成可能满足等待。`--until` 用于缩小匹配状态，不带 `--wait` 时会被拒绝。独立的 `agent wait` 在当前状态匹配时立即返回。两者默认匹配 `idle`、`done` 或 `blocked`；需要 `unknown` 时请明确使用 `--until unknown`。
 
-`idle` 和 `done` 都表示可以接受输入。CLI/API 使用服务器的已查看状态：`done` 表示尚未标记为已查看的 idle；显式 `pane focus` / `agent focus` 会标记目标，读取不会。每个 TUI 客户端独立记录它已显示的完成状态，因此其 Done 标记可能与 CLI 或其他客户端不同。`blocked` 表示 Herdr 识别到审批或提问界面。`unknown` 表示智能体存在但无法可靠分类,不代表工作成功。
+`idle` 和 `done` 都表示可以接受输入。客户端和 CLI/API 共享服务器的已查看状态：`done` 表示尚未标记为已查看的 idle。聚焦终端窗口会在所有客户端中将其显示的标签页标记为已查看；显式 `pane focus` / `agent focus` 会标记目标，读取不会。`blocked` 表示 Herdr 识别到审批或提问界面。`unknown` 表示智能体存在但无法可靠分类,不代表工作成功。
 
 `agent send-keys` 发送 `enter`、`up`、`esc`、`ctrl+c` 等逻辑按键。Herdr 会在写入任何字节前验证所有按键。`agent read` 读取解析出的终端流,`agent rename` 为已检测到的智能体命名。
 

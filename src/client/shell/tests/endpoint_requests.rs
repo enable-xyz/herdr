@@ -60,6 +60,113 @@ fn request_id(actions: &[ClientShellAction]) -> &str {
 }
 
 #[test]
+fn delayed_tab_acknowledgment_does_not_restore_lost_host_focus() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.handle_raw_events(vec![RawInputEvent::OuterFocusGained]);
+    let actions = state.prepare_host_focus().expect("tab acknowledgment");
+    let id = request_id(&actions);
+    let (_, completed) =
+        state.handle_endpoint_result("boot-1", id, Ok(crate::api::schema::ResponseResult::Ok {}));
+    assert!(matches!(
+        completed.as_slice(),
+        [ClientShellAction::HostFocusGained]
+    ));
+
+    let actions = state.prepare_host_focus().expect("second acknowledgment");
+    let id = request_id(&actions);
+    state.handle_raw_events(vec![RawInputEvent::OuterFocusLost]);
+    let (_, completed) =
+        state.handle_endpoint_result("boot-1", id, Ok(crate::api::schema::ResponseResult::Ok {}));
+    assert!(
+        completed.is_empty(),
+        "a late acknowledgment must not regain focus"
+    );
+}
+
+#[test]
+fn pending_navigation_satisfies_host_focus_without_retargeting() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let mut navigation = ClientShellInput::default();
+    state.push_endpoint_method(
+        crate::api::schema::Method::WorkspaceFocus(crate::api::schema::WorkspaceTarget {
+            workspace_id: "ws_2".into(),
+        }),
+        &mut navigation,
+    );
+    state.handle_raw_events(vec![RawInputEvent::OuterFocusGained]);
+    assert!(
+        state.prepare_host_focus().unwrap().is_empty(),
+        "focus regain must not enqueue navigation back to the old snapshot's tab"
+    );
+    let (_, completed) = state.handle_endpoint_result(
+        "boot-1",
+        request_id(&navigation.actions),
+        Ok(crate::api::schema::ResponseResult::Ok {}),
+    );
+    assert!(matches!(
+        completed.as_slice(),
+        [ClientShellAction::HostFocusGained]
+    ));
+}
+
+#[test]
+fn closed_tab_acknowledgment_still_publishes_desired_host_focus() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.handle_raw_events(vec![RawInputEvent::OuterFocusGained]);
+    let actions = state.prepare_host_focus().unwrap();
+    let (_, completed) = state.handle_endpoint_result(
+        "boot-1",
+        request_id(&actions),
+        Err(ClientShellEndpointError {
+            code: Some("tab_not_found".into()),
+            message: "tab closed before focus acknowledgment".into(),
+        }),
+    );
+    assert!(matches!(
+        completed.as_slice(),
+        [ClientShellAction::HostFocusGained]
+    ));
+}
+
+#[test]
+fn rejected_focus_admission_preserves_intent_for_the_next_projection() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.handle_raw_events(vec![RawInputEvent::OuterFocusGained]);
+    let actions = state.prepare_host_focus().unwrap();
+    let (_, completed) = state.handle_endpoint_result(
+        "boot-1",
+        request_id(&actions),
+        Err(ClientShellEndpointError {
+            code: Some("endpoint_busy".into()),
+            message: "endpoint has not admitted the request".into(),
+        }),
+    );
+    assert!(
+        completed.is_empty(),
+        "an unadmitted request cannot acknowledge focus"
+    );
+    state.set_snapshot(Box::new(snapshot()));
+    let retry = state.retry_host_focus();
+    let (_, completed) = state.handle_endpoint_result(
+        "boot-1",
+        request_id(&retry),
+        Ok(crate::api::schema::ResponseResult::Ok {}),
+    );
+    assert!(matches!(
+        completed.as_slice(),
+        [ClientShellAction::HostFocusGained]
+    ));
+}
+
+#[test]
 fn cancelling_popup_request_unblocks_input_and_ignores_late_success() {
     let (mut state, actions) = pending_popup();
     let id = request_id(&actions);
