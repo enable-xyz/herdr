@@ -921,7 +921,7 @@
           "key": "ui.content_margins",
           "type": "boolean",
           "default": "false",
-          "description": "Inset desktop terminal content while keeping the tab row and sidebar full-size. Uses at least 3 columns per side beside a visible sidebar or 10 when hidden, centers content up to 120 columns, and shrinks or disables margins to preserve 80 columns. Mobile layout is unchanged."
+          "description": "Inset desktop terminal content while keeping the tab row and sidebar full-size. Uses at least 3 columns per side beside a visible sidebar or 10 when hidden, centers the pane surface up to 90 columns, and shrinks or disables margins to preserve 80 columns. Windows with room for the cap and matching viewport heights share terminal dimensions without focus-driven resizing. Mobile layout is unchanged."
         },
         {
           "key": "ui.mouse_capture",

@@ -409,7 +409,8 @@ impl ClientShellConfig {
 }
 
 const CONTENT_MIN_WIDTH: u16 = 80;
-const CONTENT_MAX_WIDTH: u16 = 120;
+// Keep ordinary sidebar and editor-only windows on the same shared PTY width.
+const CONTENT_MAX_WIDTH: u16 = 90;
 const CONTENT_MARGIN_WITH_SIDEBAR: u16 = 3;
 const CONTENT_MARGIN_WITHOUT_SIDEBAR: u16 = 10;
 const CONTENT_VERTICAL_MARGIN_MIN_HEIGHT: u16 = 12;
@@ -622,15 +623,15 @@ mod tests {
         let expanded = shell.layout(140, 30, false, 2, 26);
         assert_eq!(expanded.sidebar, Rect::new(0, 0, 26, 30));
         assert_eq!(expanded.tab_bar, Rect::new(26, 0, 114, 1));
-        assert_eq!(expanded.pane_surface, Rect::new(29, 2, 108, 27));
+        assert_eq!(expanded.pane_surface, Rect::new(38, 2, 90, 27));
 
         let hidden = shell.layout(140, 30, true, 2, 26);
         assert!(hidden.sidebar.is_empty());
         assert_eq!(hidden.tab_bar, Rect::new(0, 0, 140, 1));
-        assert_eq!(hidden.pane_surface, Rect::new(10, 2, 120, 27));
+        assert_eq!(hidden.pane_surface, Rect::new(25, 2, 90, 27));
 
         let wide = shell.layout(200, 30, false, 2, 26);
-        assert_eq!(wide.pane_surface, Rect::new(53, 2, 120, 27));
+        assert_eq!(wide.pane_surface, Rect::new(68, 2, 90, 27));
 
         let constrained = shell.layout(106, 30, false, 2, 26);
         assert_eq!(constrained.pane_surface, Rect::new(26, 2, 80, 27));
@@ -641,19 +642,33 @@ mod tests {
         let mut state = ClientShellState::new(shell);
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize {
-                cols: 108,
-                rows: 27,
-            }
+            ClientSurfaceSize { cols: 90, rows: 27 }
         );
         state.sidebar_collapsed = true;
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize {
-                cols: 120,
-                rows: 27,
-            }
+            ClientSurfaceSize { cols: 90, rows: 27 }
         );
+    }
+
+    #[test]
+    fn content_margins_keep_shared_terminal_size_across_window_layouts() {
+        let mut config = Config::default();
+        config.ui.content_margins = true;
+        config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+        let mut sidebar = ClientShellState::new(ClientShellConfig::from_config(&config));
+        // The widest supported sidebar must still leave the preferred viewport intact.
+        sidebar.sidebar_width = 36;
+        let mut editor = ClientShellState::new(ClientShellConfig::from_config(&config));
+        editor.sidebar_collapsed = true;
+
+        let size = sidebar.surface_size(132, 40);
+        assert_eq!(size, editor.surface_size(140, 40));
+        assert_eq!(size, sidebar.surface_size(200, 40));
+        assert_eq!(size.cols, 90);
+
+        // A genuinely constrained window still fits instead of clipping its terminal.
+        assert!(sidebar.surface_size(110, 40).cols < size.cols);
     }
 
     #[test]
@@ -666,10 +681,10 @@ mod tests {
         assert_eq!(mobile.pane_surface, Rect::new(0, 2, 64, 28));
 
         let short = shell.layout(140, 12, false, 2, 26);
-        assert_eq!(short.pane_surface, Rect::new(29, 1, 108, 11));
+        assert_eq!(short.pane_surface, Rect::new(38, 1, 90, 11));
 
         let enough = shell.layout(140, 13, false, 2, 26);
-        assert_eq!(enough.pane_surface, Rect::new(29, 2, 108, 10));
+        assert_eq!(enough.pane_surface, Rect::new(38, 2, 90, 10));
     }
 
     #[test]
@@ -688,18 +703,12 @@ mod tests {
         let shell = ClientShellConfig::from_config(&config);
         assert_eq!(
             shell.initial_surface_size(140, 30),
-            ClientSurfaceSize {
-                cols: 120,
-                rows: 27,
-            }
+            ClientSurfaceSize { cols: 90, rows: 27 }
         );
         let state = ClientShellState::new(shell);
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize {
-                cols: 120,
-                rows: 27,
-            }
+            ClientSurfaceSize { cols: 90, rows: 27 }
         );
     }
 

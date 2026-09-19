@@ -193,12 +193,12 @@ fn content_margins_translate_bottom_pane_cursor_and_mouse_input() {
     let frame = state.compose(140, 20).expect("margin frame");
     let layout = state.layout(140, 20);
     assert_eq!(layout.tab_bar, Rect::new(0, 19, 140, 1));
-    assert_eq!(layout.pane_surface, Rect::new(10, 1, 120, 17));
+    assert_eq!(layout.pane_surface, Rect::new(25, 1, 90, 17));
     assert_eq!(
         frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
-        Some((11, 2))
+        Some((26, 2))
     );
-    assert_eq!(state.hits.panes[0].inner_rect, Rect::new(10, 1, 4, 2));
+    assert_eq!(state.hits.panes[0].inner_rect, Rect::new(25, 1, 4, 2));
 
     let margin =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -211,7 +211,7 @@ fn content_margins_translate_bottom_pane_cursor_and_mouse_input() {
 
     let pane = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: 12,
+        column: 27,
         row: 2,
         modifiers: KeyModifiers::empty(),
     })]);
