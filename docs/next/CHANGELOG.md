@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Fixed
+- With `ui.content_margins` enabled, cap the desktop pane surface at 90 columns so ordinary sidebar and editor-only windows can share terminal dimensions without resizing on every focus switch. Constrained windows still shrink; different viewport heights can still require resizing. This is a client-only change.
+
 ## [0.9.1] - 2026-09-16
 
 ### Added
