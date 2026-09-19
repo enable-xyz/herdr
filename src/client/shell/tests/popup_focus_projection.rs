@@ -193,12 +193,12 @@ fn content_margins_translate_bottom_pane_cursor_and_mouse_input() {
     let frame = state.compose(140, 20).expect("margin frame");
     let layout = state.layout(140, 20);
     assert_eq!(layout.tab_bar, Rect::new(0, 19, 140, 1));
-    assert_eq!(layout.pane_surface, Rect::new(25, 1, 90, 17));
+    assert_eq!(layout.pane_surface, Rect::new(30, 1, 80, 17));
     assert_eq!(
         frame.cursor.as_ref().map(|cursor| (cursor.x, cursor.y)),
-        Some((26, 2))
+        Some((31, 2))
     );
-    assert_eq!(state.hits.panes[0].inner_rect, Rect::new(25, 1, 4, 2));
+    assert_eq!(state.hits.panes[0].inner_rect, Rect::new(30, 1, 4, 2));
 
     let margin =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -211,7 +211,7 @@ fn content_margins_translate_bottom_pane_cursor_and_mouse_input() {
 
     let pane = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: 27,
+        column: 32,
         row: 2,
         modifiers: KeyModifiers::empty(),
     })]);
@@ -852,26 +852,49 @@ fn resize_invalidation_drops_stale_hits_but_preserves_gesture_release() {
 }
 
 #[test]
-fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+fn content_margins_move_single_pane_scrollbar_to_window_edge_for_render_and_input() {
+    let mut config = Config::default();
+    config.ui.content_margins = true;
+    config.ui.sidebar_start_collapsed = true;
+    config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
+    pane_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::with_lines(["LIVE▐", "PANE▐", "MORE▐", "LAST▐"]),
+        None,
+        &[],
+    );
+    pane_surface.panes[0].rect.width = 5;
+    pane_surface.panes[0].rect.height = 4;
+    pane_surface.panes[0].inner_rect.height = 4;
     pane_surface.panes[0].scrollbar_rect = Some(SurfaceRect {
-        x: 3,
+        x: 4,
         y: 0,
         width: 1,
-        height: 2,
+        height: 4,
     });
     pane_surface.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
-        offset_from_bottom: 0,
+        offset_from_bottom: 10,
         max_offset_from_bottom: 20,
-        viewport_rows: 2,
+        viewport_rows: 4,
     });
     state.set_pane_surface(pane_surface);
-    state.compose(106, 20).expect("composed frame");
+
+    let frame = state.compose(140, 20).expect("composed frame");
+    let layout = state.layout(140, 20);
     let pane = state.hits.panes[0].clone();
     let track = pane.scrollbar_rect.expect("scrollbar track");
     let metrics = pane.scroll.expect("scroll metrics");
+    assert_eq!(layout.pane_surface, Rect::new(30, 2, 80, 17));
+    assert_eq!(track, Rect::new(139, layout.pane_surface.y, 1, 4));
+    for y in track.y..track.bottom() {
+        let old_gutter_index =
+            usize::from(y) * usize::from(frame.width) + usize::from(layout.pane_surface.x + 4);
+        let remote_track_index = usize::from(y) * usize::from(frame.width) + usize::from(track.x);
+        assert_eq!(frame.cells[old_gutter_index].symbol, " ");
+        assert_eq!(frame.cells[remote_track_index].symbol, "▐");
+    }
 
     let track_click =
         state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
@@ -904,7 +927,7 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
     state.handle_endpoint_result(
         "boot-1",
         &track_scroll_id,
-        Ok(pane_scroll_result(expected as u64, 20, 2)),
+        Ok(pane_scroll_result(expected as u64, 20, 4)),
     );
 
     let thumb = crate::ui::scrollbar_thumb(metrics, track).expect("scrollbar thumb");
@@ -923,18 +946,15 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
                 crate::api::schema::Method::PaneFocus(target) if target.pane_id == "pane_1"
             )
     ));
-    assert!(matches!(
-        state.chrome_drag,
-        Some(ClientChromeDrag::PaneScrollbar { .. })
-    ));
 
+    let drag_row = track.bottom().saturating_sub(1);
     let drag = state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
         kind: MouseEventKind::Drag(MouseButton::Left),
         column: track.x,
-        row: track.y,
+        row: drag_row,
         modifiers: KeyModifiers::empty(),
     })]);
-    let expected = crate::ui::scrollbar_offset_from_drag_row(metrics, track, track.y, 0);
+    let expected = crate::ui::scrollbar_offset_from_drag_row(metrics, track, drag_row, 0);
     assert!(matches!(
         &drag.actions[..],
         [ClientShellAction::Endpoint { request, .. }]
@@ -953,7 +973,108 @@ fn pane_scrollbar_track_and_thumb_use_stable_endpoint_scroll_requests() {
             modifiers: KeyModifiers::empty(),
         })]);
     assert!(release.actions.is_empty());
-    assert!(state.chrome_drag.is_none());
+}
+
+#[test]
+fn scrollbar_relocation_preserves_default_off_and_multiple_pane_tracks() {
+    let mut single = surface();
+    single.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::with_lines(["LIVE▐", "PANE▐"]),
+        None,
+        &[],
+    );
+    single.panes[0].rect.width = 5;
+    single.panes[0].scrollbar_rect = Some(SurfaceRect {
+        x: 4,
+        y: 0,
+        width: 1,
+        height: 2,
+    });
+    single.panes[0].scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 2,
+        max_offset_from_bottom: 8,
+        viewport_rows: 2,
+    });
+
+    let mut default_state =
+        ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    default_state.set_snapshot(Box::new(snapshot()));
+    default_state.set_pane_surface(single.clone());
+    let default_frame = default_state.compose(140, 20).expect("default frame");
+    let default_layout = default_state.layout(140, 20);
+    let default_track = Rect::new(default_layout.pane_surface.x + 4, 1, 1, 2);
+    assert_eq!(
+        default_state.hits.panes[0].scrollbar_rect,
+        Some(default_track)
+    );
+    let default_track_index = usize::from(default_track.y) * usize::from(default_frame.width)
+        + usize::from(default_track.x);
+    assert_eq!(default_frame.cells[default_track_index].symbol, "▐");
+
+    let mut second = single.panes[0].clone();
+    second.pane_id = "pane_2".into();
+    second.focused = false;
+    second.rect.x = 5;
+    second.inner_rect.x = 5;
+    second.scrollbar_rect = Some(SurfaceRect {
+        x: 9,
+        y: 0,
+        width: 1,
+        height: 2,
+    });
+    let mut multiple = single;
+    multiple.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
+        &Buffer::with_lines(["LIVE▐MORE▐", "PANE▐LAST▐"]),
+        None,
+        &[],
+    );
+    multiple.panes.push(second);
+
+    let mut margin_config = Config::default();
+    margin_config.ui.content_margins = true;
+    margin_config.ui.sidebar_start_collapsed = true;
+    margin_config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+    let mut multiple_state = ClientShellState::new(ClientShellConfig::from_config(&margin_config));
+    multiple_state.set_snapshot(Box::new(snapshot()));
+    multiple_state.set_pane_surface(multiple);
+    let multiple_frame = multiple_state
+        .compose(140, 20)
+        .expect("multiple pane frame");
+    let multiple_layout = multiple_state.layout(140, 20);
+    assert_eq!(
+        multiple_state
+            .hits
+            .panes
+            .iter()
+            .map(|pane| pane.scrollbar_rect)
+            .collect::<Vec<_>>(),
+        vec![
+            Some(Rect::new(
+                multiple_layout.pane_surface.x + 4,
+                multiple_layout.pane_surface.y,
+                1,
+                2,
+            )),
+            Some(Rect::new(
+                multiple_layout.pane_surface.x + 9,
+                multiple_layout.pane_surface.y,
+                1,
+                2,
+            )),
+        ]
+    );
+    for x in [
+        multiple_layout.pane_surface.x + 4,
+        multiple_layout.pane_surface.x + 9,
+    ] {
+        let index = usize::from(multiple_layout.pane_surface.y) * usize::from(multiple_frame.width)
+            + usize::from(x);
+        assert_eq!(multiple_frame.cells[index].symbol, "▐");
+    }
+    let host_edge_index = usize::from(multiple_layout.pane_surface.y)
+        * usize::from(multiple_frame.width)
+        + usize::from(multiple_frame.width - 1);
+    assert_eq!(multiple_frame.cells[host_edge_index].symbol, " ");
 }
 
 #[test]
@@ -1199,8 +1320,12 @@ fn retained_surface_patch_recomposes_client_owned_mode_and_diagnostic_rows() {
 }
 
 #[test]
-fn retained_surface_patch_updates_scrollbar_cells_and_pane_hit_metadata() {
-    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+fn content_margin_scrollbar_patches_match_full_composition_and_clear_on_disappearance() {
+    let mut config = Config::default();
+    config.ui.content_margins = true;
+    config.ui.sidebar_start_collapsed = true;
+    config.ui.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
     state.set_snapshot(Box::new(snapshot()));
     let mut pane_surface = surface();
     pane_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(
@@ -1210,72 +1335,144 @@ fn retained_surface_patch_updates_scrollbar_cells_and_pane_hit_metadata() {
     );
     pane_surface.panes[0].rect.width = 5;
     state.set_pane_surface(pane_surface.clone());
-    let composed = state.compose(100, 30).expect("initial composed frame");
-    let layout = state.layout(100, 30);
-    let mut updated_pane = pane_surface.panes[0].clone();
-    updated_pane.scrollbar_rect = Some(SurfaceRect {
+    state.compose(140, 30).expect("initial composed frame");
+    let layout = state.layout(140, 30);
+    let cell = |symbol: &str| crate::protocol::CellData {
+        symbol: symbol.into(),
+        fg: 0,
+        bg: 0,
+        modifier: 0,
+        skip: false,
+        hyperlink: None,
+    };
+
+    let mut with_scrollbar = pane_surface.panes[0].clone();
+    with_scrollbar.scrollbar_rect = Some(SurfaceRect {
         x: 4,
         y: 0,
         width: 1,
         height: 2,
     });
-    updated_pane.scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+    with_scrollbar.scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
         offset_from_bottom: 2,
         max_offset_from_bottom: 8,
         viewport_rows: 2,
     });
-    updated_pane.mouse_reporting = true;
-    updated_pane.sgr_pixel_mouse = true;
-    let patch = crate::protocol::PaneSurfacePatch {
+    let appearance = crate::protocol::PaneSurfacePatch {
         boot_id: "boot-1".into(),
         projection_revision: 1,
         base_surface_revision: 1,
         surface_revision: 2,
-        rows: vec![crate::protocol::PaneSurfacePatchRow {
-            x: 4,
-            y: 0,
-            cells: vec![crate::protocol::CellData {
-                symbol: "▐".into(),
-                fg: 0,
-                bg: 0,
-                modifier: 0,
-                skip: false,
-                hyperlink: None,
-            }],
-        }],
-        panes: vec![updated_pane],
+        rows: vec![
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 0,
+                cells: vec![cell("▐")],
+            },
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 1,
+                cells: vec![cell("▐")],
+            },
+        ],
+        panes: vec![with_scrollbar.clone()],
         cursor: None,
     };
+    assert!(matches!(
+        state.apply_pane_surface_patch(appearance),
+        ClientPaneSurfacePatchOutcome::Applied(None)
+    ));
+    let appeared = state.compose(140, 30).expect("appearance recomposition");
+    let remote_track = Rect::new(139, layout.pane_surface.y, 1, 2);
+    assert_eq!(state.hits.panes[0].scrollbar_rect, Some(remote_track));
+    for y in remote_track.y..remote_track.bottom() {
+        let old_gutter_index =
+            usize::from(y) * usize::from(appeared.width) + usize::from(layout.pane_surface.x + 4);
+        let remote_track_index =
+            usize::from(y) * usize::from(appeared.width) + usize::from(remote_track.x);
+        assert_eq!(appeared.cells[old_gutter_index].symbol, " ");
+        assert_eq!(appeared.cells[remote_track_index].symbol, "▐");
+    }
 
-    let ClientPaneSurfacePatchOutcome::Applied(Some(patch)) = state.apply_pane_surface_patch(patch)
-    else {
-        panic!("expected fast retained patch");
+    let mut steady_pane = with_scrollbar.clone();
+    steady_pane.scroll = Some(crate::protocol::PaneSurfaceScrollMetrics {
+        offset_from_bottom: 5,
+        max_offset_from_bottom: 8,
+        viewport_rows: 2,
+    });
+    let steady = crate::protocol::PaneSurfacePatch {
+        boot_id: "boot-1".into(),
+        projection_revision: 1,
+        base_surface_revision: 2,
+        surface_revision: 3,
+        rows: vec![
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 0,
+                cells: vec![cell("▒")],
+            },
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 1,
+                cells: vec![cell("░")],
+            },
+        ],
+        panes: vec![steady_pane.clone()],
+        cursor: None,
     };
-    let patched = apply_composed_surface_patch(&composed, patch).expect("apply composed patch");
-    let scrollbar_index = usize::from(layout.pane_surface.y) * usize::from(patched.width)
-        + usize::from(layout.pane_surface.x + 4);
-    assert_eq!(patched.cells[scrollbar_index].symbol, "▐");
-    let hit = state
-        .hits
-        .panes
-        .iter()
-        .find(|hit| hit.pane_id == "pane_1")
-        .expect("pane hit");
-    assert_eq!(
-        hit.scrollbar_rect,
-        Some(Rect::new(
-            layout.pane_surface.x + 4,
-            layout.pane_surface.y,
-            1,
-            2,
-        ))
-    );
-    assert_eq!(
-        hit.scroll.map(|scroll| scroll.max_offset_from_bottom),
-        Some(8)
-    );
-    assert!(hit.mouse_reporting);
-    assert!(hit.sgr_pixel_mouse);
+    let ClientPaneSurfacePatchOutcome::Applied(Some(steady)) =
+        state.apply_pane_surface_patch(steady)
+    else {
+        panic!("expected fast retained patch for unchanged scrollbar geometry");
+    };
+    let patched =
+        apply_composed_surface_patch(&appeared, steady).expect("apply composed steady patch");
+    let fully_composed = state.compose(140, 30).expect("steady full composition");
+    assert_eq!(patched, fully_composed);
+    let remote_top_index =
+        usize::from(remote_track.y) * usize::from(patched.width) + usize::from(remote_track.x);
+    let remote_bottom_index =
+        usize::from(remote_track.y + 1) * usize::from(patched.width) + usize::from(remote_track.x);
+    assert_eq!(patched.cells[remote_top_index].symbol, "▒");
+    assert_eq!(patched.cells[remote_bottom_index].symbol, "░");
+
+    let mut without_scrollbar = steady_pane;
+    without_scrollbar.scrollbar_rect = None;
+    without_scrollbar.scroll = None;
+    let disappearance = crate::protocol::PaneSurfacePatch {
+        boot_id: "boot-1".into(),
+        projection_revision: 1,
+        base_surface_revision: 3,
+        surface_revision: 4,
+        rows: vec![
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 0,
+                cells: vec![cell(" ")],
+            },
+            crate::protocol::PaneSurfacePatchRow {
+                x: 4,
+                y: 1,
+                cells: vec![cell(" ")],
+            },
+        ],
+        panes: vec![without_scrollbar],
+        cursor: None,
+    };
+    assert!(matches!(
+        state.apply_pane_surface_patch(disappearance),
+        ClientPaneSurfacePatchOutcome::Applied(None)
+    ));
+    let disappeared = state.compose(140, 30).expect("disappearance recomposition");
+    assert_eq!(state.hits.panes[0].scrollbar_rect, None);
+    for y in remote_track.y..remote_track.bottom() {
+        let old_gutter_index = usize::from(y) * usize::from(disappeared.width)
+            + usize::from(layout.pane_surface.x + 4);
+        let remote_track_index =
+            usize::from(y) * usize::from(disappeared.width) + usize::from(remote_track.x);
+        assert_eq!(disappeared.cells[old_gutter_index].symbol, " ");
+        assert_eq!(disappeared.cells[remote_track_index].symbol, " ");
+    }
 }
 
 #[test]

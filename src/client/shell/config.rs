@@ -408,27 +408,12 @@ impl ClientShellConfig {
     }
 }
 
-const CONTENT_MIN_WIDTH: u16 = 80;
-// Keep ordinary sidebar and editor-only windows on the same shared PTY width.
-const CONTENT_MAX_WIDTH: u16 = 90;
-const CONTENT_MARGIN_WITH_SIDEBAR: u16 = 3;
-const CONTENT_MARGIN_WITHOUT_SIDEBAR: u16 = 10;
+// Fits a 124-column window with a 36-column sidebar.
+const CONTENT_WIDTH: u16 = 80;
 const CONTENT_VERTICAL_MARGIN_MIN_HEIGHT: u16 = 12;
 
-fn inset_pane_surface(area: Rect, sidebar_visible: bool) -> Rect {
-    let horizontal_inset = if area.width <= CONTENT_MIN_WIDTH {
-        0
-    } else {
-        let minimum_margin = if sidebar_visible {
-            CONTENT_MARGIN_WITH_SIDEBAR
-        } else {
-            CONTENT_MARGIN_WITHOUT_SIDEBAR
-        };
-        let desired_inset = minimum_margin
-            .saturating_mul(2)
-            .max(area.width.saturating_sub(CONTENT_MAX_WIDTH));
-        desired_inset.min(area.width.saturating_sub(CONTENT_MIN_WIDTH))
-    };
+fn inset_pane_surface(area: Rect) -> Rect {
+    let horizontal_inset = area.width.saturating_sub(CONTENT_WIDTH);
     let left = horizontal_inset / 2;
 
     let vertical_inset = u16::from(area.height >= CONTENT_VERTICAL_MARGIN_MIN_HEIGHT);
@@ -497,7 +482,7 @@ impl ClientShellConfig {
             ),
         };
         let pane_surface = if self.content_margins {
-            inset_pane_surface(pane_surface, sidebar_width > 0)
+            inset_pane_surface(pane_surface)
         } else {
             pane_surface
         };
@@ -623,15 +608,15 @@ mod tests {
         let expanded = shell.layout(140, 30, false, 2, 26);
         assert_eq!(expanded.sidebar, Rect::new(0, 0, 26, 30));
         assert_eq!(expanded.tab_bar, Rect::new(26, 0, 114, 1));
-        assert_eq!(expanded.pane_surface, Rect::new(38, 2, 90, 27));
+        assert_eq!(expanded.pane_surface, Rect::new(43, 2, 80, 27));
 
         let hidden = shell.layout(140, 30, true, 2, 26);
         assert!(hidden.sidebar.is_empty());
         assert_eq!(hidden.tab_bar, Rect::new(0, 0, 140, 1));
-        assert_eq!(hidden.pane_surface, Rect::new(25, 2, 90, 27));
+        assert_eq!(hidden.pane_surface, Rect::new(30, 2, 80, 27));
 
         let wide = shell.layout(200, 30, false, 2, 26);
-        assert_eq!(wide.pane_surface, Rect::new(68, 2, 90, 27));
+        assert_eq!(wide.pane_surface, Rect::new(73, 2, 80, 27));
 
         let constrained = shell.layout(106, 30, false, 2, 26);
         assert_eq!(constrained.pane_surface, Rect::new(26, 2, 80, 27));
@@ -642,12 +627,12 @@ mod tests {
         let mut state = ClientShellState::new(shell);
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize { cols: 90, rows: 27 }
+            ClientSurfaceSize { cols: 80, rows: 27 }
         );
         state.sidebar_collapsed = true;
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize { cols: 90, rows: 27 }
+            ClientSurfaceSize { cols: 80, rows: 27 }
         );
     }
 
@@ -662,13 +647,13 @@ mod tests {
         let mut editor = ClientShellState::new(ClientShellConfig::from_config(&config));
         editor.sidebar_collapsed = true;
 
-        let size = sidebar.surface_size(132, 40);
-        assert_eq!(size, editor.surface_size(140, 40));
-        assert_eq!(size, sidebar.surface_size(200, 40));
-        assert_eq!(size.cols, 90);
+        let size = sidebar.surface_size(124, 95);
+        assert_eq!(size, editor.surface_size(124, 95));
+        assert_eq!(size, sidebar.surface_size(200, 95));
+        assert_eq!(size.cols, 80);
 
         // A genuinely constrained window still fits instead of clipping its terminal.
-        assert!(sidebar.surface_size(110, 40).cols < size.cols);
+        assert!(sidebar.surface_size(110, 95).cols < size.cols);
     }
 
     #[test]
@@ -681,10 +666,10 @@ mod tests {
         assert_eq!(mobile.pane_surface, Rect::new(0, 2, 64, 28));
 
         let short = shell.layout(140, 12, false, 2, 26);
-        assert_eq!(short.pane_surface, Rect::new(38, 1, 90, 11));
+        assert_eq!(short.pane_surface, Rect::new(43, 1, 80, 11));
 
         let enough = shell.layout(140, 13, false, 2, 26);
-        assert_eq!(enough.pane_surface, Rect::new(38, 2, 90, 10));
+        assert_eq!(enough.pane_surface, Rect::new(43, 2, 80, 10));
     }
 
     #[test]
@@ -703,12 +688,12 @@ mod tests {
         let shell = ClientShellConfig::from_config(&config);
         assert_eq!(
             shell.initial_surface_size(140, 30),
-            ClientSurfaceSize { cols: 90, rows: 27 }
+            ClientSurfaceSize { cols: 80, rows: 27 }
         );
         let state = ClientShellState::new(shell);
         assert_eq!(
             state.surface_size(140, 30),
-            ClientSurfaceSize { cols: 90, rows: 27 }
+            ClientSurfaceSize { cols: 80, rows: 27 }
         );
     }
 

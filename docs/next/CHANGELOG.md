@@ -3,7 +3,8 @@
 ## Unreleased
 
 ### Fixed
-- With `ui.content_margins` enabled, cap the desktop pane surface at 90 columns so ordinary sidebar and editor-only windows can share terminal dimensions without resizing on every focus switch. Constrained windows still shrink; different viewport heights can still require resizing. This is a client-only change.
+- With `ui.content_margins` enabled, center the desktop pane surface at 80 columns so a 124-column window with a 36-column sidebar and an editor-only window can share terminal dimensions without resizing on every focus switch. Constrained windows still shrink; different viewport heights can still require resizing. This is a client-only change.
+- Draw a single visible pane's scrollbar at the far-right window edge outside the content margin, preserving track clicks, thumb dragging, and incremental updates. Split panes retain their individual tracks; server-side terminal geometry is unchanged.
 
 ## [0.9.1] - 2026-09-16
 

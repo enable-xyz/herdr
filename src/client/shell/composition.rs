@@ -1,5 +1,21 @@
 use super::*;
 
+pub(super) fn project_scrollbar(
+    rect: crate::protocol::SurfaceRect,
+    area: Rect,
+    window_edge: Option<u16>,
+) -> Rect {
+    Rect::new(
+        window_edge.map_or_else(
+            || area.x.saturating_add(rect.x),
+            |edge| edge.saturating_sub(rect.width),
+        ),
+        area.y.saturating_add(rect.y),
+        rect.width,
+        rect.height,
+    )
+}
+
 fn restore_mode_bar(
     frame: &mut FrameData,
     bar: Option<Rect>,
@@ -20,6 +36,19 @@ fn restore_mode_bar(
 }
 
 impl ClientShellState {
+    pub(super) fn window_scrollbar_edge(
+        &self,
+        layout: ClientShellLayout,
+        cols: u16,
+        pane_count: usize,
+    ) -> Option<u16> {
+        (self.config.content_margins
+            && layout.mobile_header.is_empty()
+            && pane_count == 1
+            && layout.pane_surface.right() < cols)
+            .then_some(cols)
+    }
+
     fn compose_unavailable(&mut self, cols: u16, rows: u16) -> FrameData {
         let layout = self.layout(cols, rows);
         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
@@ -162,6 +191,7 @@ impl ClientShellState {
             return None;
         }
         let layout = self.layout(cols, rows);
+        let scrollbar_edge = self.window_scrollbar_edge(layout, cols, surface.panes.len());
         if self.last_tab_bar_width != Some(layout.tab_bar.width) {
             self.last_tab_bar_width = Some(layout.tab_bar.width);
             self.reveal_focused_tab = true;
@@ -225,14 +255,9 @@ impl ClientShellState {
                     pane.inner_rect.width,
                     pane.inner_rect.height,
                 ),
-                scrollbar_rect: pane.scrollbar_rect.map(|rect| {
-                    Rect::new(
-                        layout.pane_surface.x.saturating_add(rect.x),
-                        layout.pane_surface.y.saturating_add(rect.y),
-                        rect.width,
-                        rect.height,
-                    )
-                }),
+                scrollbar_rect: pane
+                    .scrollbar_rect
+                    .map(|rect| project_scrollbar(rect, layout.pane_surface, scrollbar_edge)),
                 scroll: pane.scroll.map(|metrics| crate::pane::ScrollMetrics {
                     offset_from_bottom: usize::try_from(metrics.offset_from_bottom)
                         .unwrap_or(usize::MAX),
@@ -318,6 +343,29 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if let Some(edge) = scrollbar_edge {
+            if let Some(track) = surface.panes[0].scrollbar_rect {
+                let source = project_scrollbar(track, layout.pane_surface, None);
+                let destination = project_scrollbar(track, layout.pane_surface, Some(edge));
+                for y in source.y
+                    ..source
+                        .bottom()
+                        .min(layout.pane_surface.bottom())
+                        .min(frame.height)
+                {
+                    for offset in 0..track.width {
+                        let x = source.x.saturating_add(offset);
+                        let target_x = destination.x.saturating_add(offset);
+                        if x < layout.pane_surface.right() && target_x < frame.width {
+                            let row = usize::from(y) * usize::from(frame.width);
+                            frame
+                                .cells
+                                .swap(row + usize::from(x), row + usize::from(target_x));
+                        }
+                    }
+                }
+            }
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self

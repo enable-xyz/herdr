@@ -168,22 +168,45 @@ impl ClientShellState {
             }
         }
 
-        let fast_path_blocker = fast_path_blocker(self, &patch);
+        let (cols, rows) = self.last_composed_size.unwrap_or_default();
+        let layout = self.layout(cols, rows);
+        let scrollbar_edge = self.window_scrollbar_edge(layout, cols, current.panes.len());
+        let relocated_track = scrollbar_edge.and_then(|_| current.panes[0].scrollbar_rect);
+        // Track appearance/disappearance changes both the source gutter and the outer margin.
+        // Recompose those structural transitions; ordinary thumb updates stay incremental.
+        let track_changed = scrollbar_edge.is_some()
+            && patch
+                .panes
+                .iter()
+                .any(|pane| pane.scrollbar_rect != current.panes[0].scrollbar_rect);
+        let fast_path_blocker = fast_path_blocker(self, &patch).or_else(|| {
+            track_changed.then_some("client_surface_patch.fallback.scrollbar_geometry")
+        });
         if let Some(reason) = fast_path_blocker {
             crate::render_prof::event(reason);
         }
-        let fast_path_area = fast_path_blocker.is_none().then(|| {
-            let (cols, rows) = self.last_composed_size.unwrap_or_default();
-            self.layout(cols, rows).pane_surface
-        });
+        let fast_path_area = fast_path_blocker.is_none().then_some(layout.pane_surface);
         let composed_patch = fast_path_area.map(|area| ClientComposedSurfacePatch {
             rows: patch
                 .rows
                 .iter()
-                .map(|row| crate::protocol::PaneSurfacePatchRow {
-                    x: area.x.saturating_add(row.x),
-                    y: area.y.saturating_add(row.y),
-                    cells: row.cells.clone(),
+                .map(|row| {
+                    let edge = scrollbar_edge.filter(|_| {
+                        relocated_track.is_some_and(|rect| {
+                            row.x == rect.x
+                                && row.y >= rect.y
+                                && row.y < rect.y.saturating_add(rect.height)
+                                && row.cells.len() == usize::from(rect.width)
+                        })
+                    });
+                    crate::protocol::PaneSurfacePatchRow {
+                        x: edge.map_or_else(
+                            || area.x.saturating_add(row.x),
+                            |edge| edge.saturating_sub(row.cells.len() as u16),
+                        ),
+                        y: area.y.saturating_add(row.y),
+                        cells: row.cells.clone(),
+                    }
                 })
                 .collect(),
             cursor: patch
@@ -213,14 +236,9 @@ impl ClientShellState {
                 else {
                     continue;
                 };
-                hit.scrollbar_rect = updated.scrollbar_rect.map(|rect| {
-                    Rect::new(
-                        area.x.saturating_add(rect.x),
-                        area.y.saturating_add(rect.y),
-                        rect.width,
-                        rect.height,
-                    )
-                });
+                hit.scrollbar_rect = updated
+                    .scrollbar_rect
+                    .map(|rect| composition::project_scrollbar(rect, area, scrollbar_edge));
                 hit.scroll = updated.scroll.map(|metrics| crate::pane::ScrollMetrics {
                     offset_from_bottom: usize::try_from(metrics.offset_from_bottom)
                         .unwrap_or(usize::MAX),
