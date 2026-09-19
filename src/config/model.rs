@@ -929,9 +929,9 @@ pub struct UiConfig {
     pub workspace_open_command_title: String,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
-    /// Inset desktop pane content while native chrome remains full-size. Uses at least 3 columns
-    /// beside a visible sidebar or 10 when hidden, centers content up to 90 columns, and shrinks
-    /// or disables margins to preserve 80 columns. Mobile layout is unchanged. Default: false.
+    /// Center desktop pane content at up to 80 columns while native chrome remains full-size.
+    /// Narrower areas use their available width. A single pane's scrollbar moves to the window
+    /// edge when a right margin exists. Mobile layout is unchanged. Default: false.
     pub content_margins: bool,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
     pub mouse_capture: bool,
