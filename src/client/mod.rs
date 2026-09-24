@@ -1943,6 +1943,14 @@ async fn run_client_loop(
                                 )));
                             }
                         };
+                        // Only an accepted authoritative snapshot can close a launched
+                        // workspace. Disconnection notices and projection transitions cannot.
+                        if state.shell.as_ref().is_some_and(|shell| {
+                            shell.workspace_lifetime_ended(&endpoint_id, generation, &snapshot)
+                        }) {
+                            let _ = write_to_server(&mut write_stream, &ClientMessage::Detach);
+                            return Ok(());
+                        }
                         let projection_pending = activation_message;
                         let activation_progress = activation_message
                             .then(|| {

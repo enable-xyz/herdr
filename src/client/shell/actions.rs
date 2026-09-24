@@ -503,6 +503,9 @@ impl ClientShellState {
             None => snapshot.focused_workspace_id.as_deref() == Some(target.workspace_id.as_str()),
         };
         if focused {
+            if self.config.exit_on_workspace_close {
+                self.lifetime_workspace_id = Some(target.workspace_id);
+            }
             self.config.launch_target = None;
             return Ok(Vec::new());
         }
@@ -534,6 +537,25 @@ impl ClientShellState {
             return Err("requested client target is not ready".into());
         }
         Ok(outcome.actions)
+    }
+
+    pub(crate) fn workspace_lifetime_ended(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        generation: u64,
+        snapshot: &ClientShellSnapshot,
+    ) -> bool {
+        endpoint_id == &ClientEndpointId::Local
+            && self.accepts_endpoint_snapshot(endpoint_id, Some(generation), snapshot)
+            && self
+                .lifetime_workspace_id
+                .as_ref()
+                .is_some_and(|workspace_id| {
+                    !snapshot
+                        .workspaces
+                        .iter()
+                        .any(|workspace| &workspace.workspace_id == workspace_id)
+                })
     }
 
     pub(crate) fn prepare_host_focus(&mut self) -> Option<Vec<ClientShellAction>> {
