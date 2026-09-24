@@ -1301,6 +1301,7 @@ fn launch_target_waits_for_snapshot_then_uses_connection_endpoint_lane() {
         workspace_id: Some("ws_1".into()),
         pane_id: Some("pane_1".into()),
         hide_sidebar: true,
+        exit_on_workspace_close: false,
     };
     let config = ClientShellConfig::from_config(&Config::default()).with_launch_options(&options);
     assert_eq!(config.initial_surface_size(100, 30).cols, 100);
@@ -1370,6 +1371,7 @@ fn launch_target_refuses_a_pane_from_another_workspace() {
         workspace_id: Some("ws_2".into()),
         pane_id: Some("pane_1".into()),
         hide_sidebar: false,
+        exit_on_workspace_close: false,
     };
     let config = ClientShellConfig::from_config(&Config::default()).with_launch_options(&options);
     let mut state = ClientShellState::new(config);
@@ -1384,4 +1386,91 @@ fn launch_target_refuses_a_pane_from_another_workspace() {
             .unwrap_err(),
         "requested pane pane_1 does not belong to workspace ws_2"
     );
+}
+
+#[test]
+fn workspace_lifetime_starts_after_focus_and_ends_only_on_original_workspace_removal() {
+    let options = crate::client::ClientLaunchOptions {
+        workspace_id: Some("ws_1".into()),
+        pane_id: Some("pane_1".into()),
+        exit_on_workspace_close: true,
+        ..Default::default()
+    };
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&Config::default()).with_launch_options(&options),
+    );
+    let mut projected = snapshot();
+    projected.focused_pane_id = None;
+    state.set_snapshot(Box::new(projected.clone()));
+    state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap();
+    let mut removed = projected.clone();
+    removed.workspaces.clear();
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &removed));
+    assert_eq!(
+        state
+            .prepare_launch_target(&ClientEndpointId::Local, &removed, 1)
+            .unwrap_err(),
+        "requested workspace ws_1 is not available"
+    );
+
+    projected.focused_pane_id = Some("pane_1".into());
+    state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap();
+    assert!(!state.launch_target_pending());
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &projected));
+    assert!(!state.workspace_lifetime_ended(
+        &ClientEndpointId::Ssh(
+            crate::client::endpoint::ProfileId::parse("0123456789abcdef0123456789abcdef").unwrap()
+        ),
+        1,
+        &removed
+    ));
+    let mut unrelated = projected.clone();
+    let mut other_workspace = unrelated.workspaces[0].clone();
+    other_workspace.workspace_id = "ws_2".into();
+    unrelated.workspaces.push(other_workspace);
+    unrelated.focused_workspace_id = Some("ws_2".into());
+    unrelated.focused_pane_id = None;
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &unrelated));
+    unrelated.workspaces.pop();
+    unrelated.panes.clear();
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &unrelated));
+
+    state.mark_endpoint_disconnected(&ClientEndpointId::Local);
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &unrelated));
+    projected.revision = 10;
+    state.cache_endpoint_snapshot_for_generation(
+        &ClientEndpointId::Local,
+        1,
+        Box::new(projected.clone()),
+    );
+    removed.revision = 9;
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &removed));
+    removed.revision = 11;
+    assert!(state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &removed));
+    removed.revision = 1;
+    assert!(state.workspace_lifetime_ended(&ClientEndpointId::Local, 2, &removed));
+    removed.boot_id.push_str("-restarted");
+    assert!(state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &removed));
+}
+
+#[test]
+fn ordinary_client_continues_after_requested_workspace_closes() {
+    let options = crate::client::ClientLaunchOptions {
+        workspace_id: Some("ws_1".into()),
+        ..Default::default()
+    };
+    let mut state = ClientShellState::new(
+        ClientShellConfig::from_config(&Config::default()).with_launch_options(&options),
+    );
+    let projected = snapshot();
+    state
+        .prepare_launch_target(&ClientEndpointId::Local, &projected, 1)
+        .unwrap();
+    let mut removed = projected.clone();
+    removed.workspaces.clear();
+    assert!(!state.workspace_lifetime_ended(&ClientEndpointId::Local, 1, &removed));
 }

@@ -481,6 +481,24 @@ impl ClientShellState {
         self.cache_endpoint_snapshot_inner(endpoint_id, Some(generation), snapshot);
     }
 
+    pub(super) fn accepts_endpoint_snapshot(
+        &self,
+        endpoint_id: &ClientEndpointId,
+        generation: Option<u64>,
+        snapshot: &ClientShellSnapshot,
+    ) -> bool {
+        self.endpoints
+            .iter()
+            .find(|endpoint| &endpoint.endpoint_id == endpoint_id)
+            .is_some_and(|endpoint| {
+                endpoint.snapshot_generation != generation
+                    || endpoint.snapshot.as_deref().is_none_or(|previous| {
+                        previous.boot_id != snapshot.boot_id
+                            || previous.revision <= snapshot.revision
+                    })
+            })
+    }
+
     fn cache_endpoint_snapshot_inner(
         &mut self,
         endpoint_id: &ClientEndpointId,
@@ -497,14 +515,7 @@ impl ClientShellState {
         else {
             return;
         };
-        if self.endpoints[index].snapshot_generation == generation
-            && self.endpoints[index]
-                .snapshot
-                .as_deref()
-                .is_some_and(|previous| {
-                    previous.boot_id == snapshot.boot_id && previous.revision > snapshot.revision
-                })
-        {
+        if !self.accepts_endpoint_snapshot(endpoint_id, generation, &snapshot) {
             return;
         }
         let boot_changed = self.endpoints[index]
