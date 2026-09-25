@@ -72,6 +72,8 @@ The server owns panes and process state. The client is the terminal UI attached 
 
 With one attached client, all tabs follow its size as before. With multiple clients, each can view its own workspace and tab. Different viewed tabs follow their respective clients; when clients view the same tab, the last one to focus, select, or interact with it controls that tab's pane sizes.
 
+To open another native client at an existing workspace, run `herdr client --workspace <id>`. This focuses that workspace once after the initial snapshot; the client can navigate freely afterward. For a window that should close with its launch workspace, use `herdr client --workspace <id> --exit-on-workspace-close`. This opt-in detaches that client successfully when the original workspace closes, without switching it to another workspace; changing focus or closing only a pane does not end it. Other clients and the server keep running. Without the option, clients continue their normal behavior.
+
 Detach the client with `ctrl+b q`. The server and agents continue running.
 
 If you want to end the session and stop its panes, stop the server:

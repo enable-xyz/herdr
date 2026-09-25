@@ -63,6 +63,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) startup_config_diagnostic: Option<String>,
     pub(super) startup_onboarding: bool,
     pub(super) launch_target: Option<ClientShellLaunchTarget>,
+    pub(super) exit_on_workspace_close: bool,
     pub(super) launch_hide_sidebar: bool,
 }
 
@@ -961,6 +962,7 @@ pub(crate) struct ClientShellState {
     pub(super) dismissed_product_announcement: Option<(String, String)>,
     pub(super) launch_sidebar_override_active: bool,
     pub(super) launch_target_error: Option<String>,
+    pub(super) lifetime_workspace_id: Option<String>,
 }
 
 pub(super) fn product_announcement_state(
@@ -1132,6 +1134,7 @@ impl ClientShellState {
             dismissed_product_announcement: None,
             launch_sidebar_override_active,
             launch_target_error: None,
+            lifetime_workspace_id: None,
         }
     }
 

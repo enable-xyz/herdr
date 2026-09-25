@@ -176,6 +176,7 @@ impl ClientShellConfig {
             startup_config_diagnostic: None,
             startup_onboarding: false,
             launch_target: None,
+            exit_on_workspace_close: false,
             launch_hide_sidebar: false,
         }
     }
@@ -214,6 +215,7 @@ impl ClientShellConfig {
                     requested_boot_id: None,
                     requested_generation: None,
                 });
+        self.exit_on_workspace_close = options.exit_on_workspace_close;
         self.launch_hide_sidebar = options.hide_sidebar;
         if options.hide_sidebar {
             self.sidebar_collapsed_mode = SidebarCollapsedModeConfig::Hidden;

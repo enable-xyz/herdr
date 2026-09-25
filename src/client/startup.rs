@@ -5,6 +5,7 @@ pub struct ClientLaunchOptions {
     pub workspace_id: Option<String>,
     pub pane_id: Option<String>,
     pub hide_sidebar: bool,
+    pub exit_on_workspace_close: bool,
 }
 
 pub fn parse_client_launch_args(args: &[String]) -> Result<ClientLaunchOptions, String> {
@@ -39,11 +40,21 @@ pub fn parse_client_launch_args(args: &[String]) -> Result<ClientLaunchOptions, 
                 options.hide_sidebar = true;
                 index += 1;
             }
+            "--exit-on-workspace-close" => {
+                if options.exit_on_workspace_close {
+                    return Err("--exit-on-workspace-close may only be specified once".into());
+                }
+                options.exit_on_workspace_close = true;
+                index += 1;
+            }
             argument => return Err(format!("unknown client option: {argument}")),
         }
     }
     if options.pane_id.is_some() && options.workspace_id.is_none() {
         return Err("--pane requires --workspace".into());
+    }
+    if options.exit_on_workspace_close && options.workspace_id.is_none() {
+        return Err("--exit-on-workspace-close requires --workspace".into());
     }
     Ok(options)
 }
@@ -92,16 +103,49 @@ mod tests {
                 workspace_id: Some("workspace-1".into()),
                 pane_id: Some("pane-2".into()),
                 hide_sidebar: true,
+                exit_on_workspace_close: false,
             }
         );
     }
 
     #[test]
-    fn client_launch_parser_requires_workspace_for_pane() {
-        let args = ["--pane", "pane-2"].map(str::to_owned);
-        assert_eq!(
-            parse_client_launch_args(&args).unwrap_err(),
-            "--pane requires --workspace"
+    fn client_launch_parser_accepts_workspace_lifetime_opt_in_in_either_order() {
+        for args in [
+            ["--workspace", "workspace-1", "--exit-on-workspace-close"],
+            ["--exit-on-workspace-close", "--workspace", "workspace-1"],
+        ] {
+            let options = parse_client_launch_args(&args.map(str::to_owned)).unwrap();
+            assert_eq!(options.workspace_id.as_deref(), Some("workspace-1"));
+            assert!(options.exit_on_workspace_close);
+        }
+        assert!(
+            !parse_client_launch_args(&[])
+                .unwrap()
+                .exit_on_workspace_close
         );
+    }
+
+    #[test]
+    fn client_launch_parser_requires_workspace_for_pane_and_lifetime_opt_in() {
+        for args in [
+            &["--pane", "pane-2"][..],
+            &["--exit-on-workspace-close"],
+            &["--exit-on-workspace-close", "--pane", "pane-2"],
+        ] {
+            let args = args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+            assert!(parse_client_launch_args(&args).is_err());
+        }
+    }
+
+    #[test]
+    fn client_launch_parser_rejects_duplicate_lifetime_opt_in() {
+        let args = [
+            "--workspace",
+            "workspace-1",
+            "--exit-on-workspace-close",
+            "--exit-on-workspace-close",
+        ]
+        .map(str::to_owned);
+        assert!(parse_client_launch_args(&args).is_err());
     }
 }

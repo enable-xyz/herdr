@@ -127,6 +127,11 @@ fn client_command() -> Command {
                 .help("Focus an existing pane in --workspace"),
         )
         .arg(flag("hide-sidebar").help("Start with the client-local sidebar hidden"))
+        .arg(
+            flag("exit-on-workspace-close")
+                .requires("workspace")
+                .help("Detach when the launch workspace closes"),
+        )
 }
 
 fn update_command() -> Command {

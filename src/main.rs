@@ -573,7 +573,7 @@ fn main() -> io::Result<()> {
             .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
         {
             platform::begin_cli_output();
-            println!("Usage: herdr client [--workspace <id> [--pane <id>]] [--hide-sidebar]");
+            println!("Usage: herdr client [--workspace <id> [--pane <id>] [--exit-on-workspace-close]] [--hide-sidebar]");
             println!();
             println!("Connect a native client shell to an already-running Herdr session.");
             println!();
@@ -581,6 +581,7 @@ fn main() -> io::Result<()> {
             println!("  --workspace <id>  Focus an existing workspace after the initial snapshot");
             println!("  --pane <id>       Focus an existing pane in --workspace");
             println!("  --hide-sidebar    Start with the client-local sidebar hidden");
+            println!("  --exit-on-workspace-close  Detach when the launch workspace closes (requires --workspace)");
             println!("  --help, -h        Show this help");
             return Ok(());
         }
@@ -588,7 +589,7 @@ fn main() -> io::Result<()> {
             Ok(options) => options,
             Err(err) => {
                 eprintln!("error: {err}");
-                eprintln!("usage: herdr client [--workspace <id> [--pane <id>]] [--hide-sidebar]");
+                eprintln!("usage: herdr client [--workspace <id> [--pane <id>] [--exit-on-workspace-close]] [--hide-sidebar]");
                 std::process::exit(2);
             }
         };
@@ -732,6 +733,7 @@ fn main() -> io::Result<()> {
         println!("  --workspace <id>  Client launch target (requires `herdr client`)");
         println!("  --pane <id>       Exact pane launch target (requires --workspace)");
         println!("  --hide-sidebar    Start a client with its sidebar hidden");
+        println!("  --exit-on-workspace-close  Detach when the client launch workspace closes");
         println!("  --remote-keybindings <local|server>");
         println!("                      Keybindings for --remote app attach (default: local)");
         println!("  --handoff           Opt into live handoff for update or remote attach");

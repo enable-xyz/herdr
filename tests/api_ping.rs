@@ -1483,8 +1483,9 @@ fn events_subscribe_streams_workspace_tab_and_agent_events() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_l2","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            pane_id
+            r#"{{"id":"req_l2","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -1747,8 +1748,9 @@ fn pane_report_agent_updates_effective_state() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_hook_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            pane_id
+            r#"{{"id":"req_hook_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2018,8 +2020,9 @@ fn official_release_waits_for_confirmed_process_exit() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_release_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            pane_id
+            r#"{{"id":"req_release_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2169,8 +2172,9 @@ fn pane_clear_agent_authority_restores_fallback_state() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_clear_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            pane_id
+            r#"{{"id":"req_clear_2","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2346,8 +2350,9 @@ fn events_subscribe_streams_output_and_agent_status_events() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_24","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            pane_id
+            r#"{{"id":"req_24","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2380,11 +2385,15 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
 
     fs::create_dir_all(&bin_dir).unwrap();
     let fake_pi = bin_dir.join("pi");
+    let begin_working_file = base.join("pi-begin-working");
+    let finish_file = base.join("pi-finish");
     let stop_file = base.join("pi-stop");
     fs::write(
         &fake_pi,
         format!(
-            "#!/bin/sh\nprintf 'starting\\n'\nsleep 4\nprintf 'Working...\\n'\nsleep 1\nprintf '\\033[2J\\033[Hdone\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            "#!/bin/sh\nprintf 'starting\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf 'Working...\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '\\033[2J\\033[Hdone\\n'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\n",
+            begin_working_file.display(),
+            finish_file.display(),
             stop_file.display()
         ),
     )
@@ -2446,8 +2455,9 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
     let send_pi = send_request(
         &socket_path,
         &format!(
-            r#"{{"id":"req_status_3","method":"pane.send_text","params":{{"pane_id":"{}","text":"pi"}}}}"#,
-            background_pane_id
+            r#"{{"id":"req_status_3","method":"pane.send_text","params":{{"pane_id":"{}","text":"{}"}}}}"#,
+            background_pane_id,
+            fake_pi.display()
         ),
     );
     assert_eq!(send_pi["result"]["type"], "ok");
@@ -2459,6 +2469,52 @@ fn pane_info_and_subscriptions_expose_done_agent_status() {
         ),
     );
     assert_eq!(send_enter["result"]["type"], "ok");
+
+    // Let initial process acquisition settle at idle before starting real work.
+    let idle_deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let pane = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_status_idle","method":"pane.get","params":{{"pane_id":"{}"}}}}"#,
+                background_pane_id
+            ),
+        );
+        if pane["result"]["pane"]["agent"] == "pi"
+            && pane["result"]["pane"]["agent_status"] == "idle"
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < idle_deadline,
+            "background Pi never completed initial acquisition: {pane}"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    fs::write(&begin_working_file, "begin").unwrap();
+
+    // Keep work visible until it has been observed before allowing completion.
+    let working_deadline = Instant::now() + Duration::from_secs(12);
+    loop {
+        let pane = send_request(
+            &socket_path,
+            &format!(
+                r#"{{"id":"req_status_working","method":"pane.get","params":{{"pane_id":"{}"}}}}"#,
+                background_pane_id
+            ),
+        );
+        if pane["result"]["pane"]["agent"] == "pi"
+            && pane["result"]["pane"]["agent_status"] == "working"
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < working_deadline,
+            "background Pi never reached working state: {pane}"
+        );
+        thread::sleep(Duration::from_millis(100));
+    }
+    fs::write(&finish_file, "finish").unwrap();
 
     let status_event = reader.read_json_line(Duration::from_secs(12));
     assert_eq!(status_event["event"], "pane.agent_status_changed");
