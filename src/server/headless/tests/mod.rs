@@ -5238,7 +5238,7 @@ fn headless_scheduled_tasks_clears_disabled_agent_manifest_update_deadline() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn headless_scheduled_tasks_start_pending_agent_resume_without_foreground_client() {
+async fn headless_scheduled_tasks_preserve_unexposed_agent_resume_without_foreground_client() {
     let mut server = test_headless_server();
     let workspace = crate::workspace::Workspace::test_new("restored");
     let pane_id = workspace.tabs[0].root_pane;
@@ -5264,22 +5264,12 @@ async fn headless_scheduled_tasks_start_pending_agent_resume_without_foreground_
     let now = Instant::now();
     assert!(!server.handle_scheduled_tasks_headless(now, false));
     assert!(server.app.terminal_runtimes.get(&terminal_id).is_none());
-    let deadline = server
-        .app
-        .pending_agent_resume_deadline
-        .expect("clientless resume should wait briefly for a host theme");
-
-    assert!(server.handle_scheduled_tasks_headless(deadline, false));
-    assert!(server.app.terminal_runtimes.get(&terminal_id).is_some());
-    assert!(server
-        .app
-        .state
-        .terminals
-        .get(&terminal_id)
-        .expect("test terminal should still exist")
+    assert!(server.app.pending_agent_resume_deadline.is_none());
+    assert!(!server.handle_scheduled_tasks_headless(now, false));
+    assert!(server.app.terminal_runtimes.get(&terminal_id).is_none());
+    assert!(server.app.state.terminals[&terminal_id]
         .pending_agent_resume_plan
-        .is_none());
-    shutdown_test_runtimes(&mut server);
+        .is_some());
 }
 
 #[test]

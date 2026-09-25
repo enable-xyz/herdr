@@ -785,12 +785,7 @@ impl HeadlessServer {
             self.app.pending_agent_resume_deadline = None;
             return;
         }
-        let now = Instant::now();
-        self.app.sync_pending_agent_resume_deadline(now);
-        if self
-            .app
-            .start_pending_agent_resumes(self.app.pending_agent_resume_due(now))
-        {
+        if self.start_visible_pending_agent_resumes(Instant::now()) {
             for client in self.clients.values_mut() {
                 client.request_recompute();
             }
@@ -3330,7 +3325,7 @@ impl HeadlessServer {
     /// Handle scheduled tasks for the headless server.
     ///
     /// Similar to the former App scheduler but without terminal resize polling.
-    fn handle_scheduled_tasks_headless(&mut self, now: Instant, geometry_dirty: bool) -> bool {
+    fn handle_scheduled_tasks_headless(&mut self, now: Instant, _geometry_dirty: bool) -> bool {
         let mut changed = false;
 
         // No resize polling needed — server has no terminal.
@@ -3414,14 +3409,7 @@ impl HeadlessServer {
 
         changed |= self.app.handle_tab_bar_status_tasks(now);
 
-        if geometry_dirty {
-            self.app.pending_agent_resume_deadline = None;
-        } else {
-            self.app.sync_pending_agent_resume_deadline(now);
-            changed |= self
-                .app
-                .start_pending_agent_resumes(self.app.pending_agent_resume_due(now));
-        }
+        changed |= self.start_visible_pending_agent_resumes(now);
         changed
     }
 }

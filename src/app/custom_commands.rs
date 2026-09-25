@@ -742,7 +742,7 @@ mod tests {
         ));
         let _ = std::fs::remove_file(&path);
         let mut command = binding(crate::config::CustomCommandAction::Shell);
-        command.command = format!("printf invoked > {}", path.display());
+        command.command = format!("printf invoked > {0}.tmp && mv {0}.tmp {0}", path.display());
         install(&mut app, command);
         let command_id = app.client_shell_command_manifest()[0].command_id.clone();
 
