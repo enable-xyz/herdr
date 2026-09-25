@@ -514,6 +514,27 @@ impl HeadlessServer {
         }
     }
 
+    /// Demand is the union of currently exposed shell surfaces, not the saved
+    /// workspace tree or the shared foreground client's projection.
+    pub(super) fn pending_agent_resume_surfaces(&self) -> Vec<(crate::ui::TabSurfaceTarget, Rect)> {
+        self.clients
+            .iter()
+            .filter(|(_, client)| client.is_active_shell_client() && client.writer.is_some())
+            .filter_map(|(&client_id, client)| {
+                let target = self.shell_target_for_client(client_id)?;
+                let (cols, rows) = client.terminal_size;
+                (cols > 0 && rows > 0).then_some((target, Rect::new(0, 0, cols, rows)))
+            })
+            .collect()
+    }
+
+    pub(super) fn start_visible_pending_agent_resumes(&mut self, now: Instant) -> bool {
+        let surfaces = self.pending_agent_resume_surfaces();
+        self.app.sync_pending_agent_resume_deadline(now, &surfaces);
+        self.app
+            .start_pending_agent_resumes(&surfaces, self.app.pending_agent_resume_due(now))
+    }
+
     fn finish_shell_tab_geometry_change(&mut self, start_pending_agent_resumes: bool) {
         for client in self.clients.values_mut() {
             client.request_recompute();
@@ -522,12 +543,7 @@ impl HeadlessServer {
             self.app.pending_agent_resume_deadline = None;
             return;
         }
-        let now = Instant::now();
-        self.app.sync_pending_agent_resume_deadline(now);
-        if self
-            .app
-            .start_pending_agent_resumes(self.app.pending_agent_resume_due(now))
-        {
+        if self.start_visible_pending_agent_resumes(Instant::now()) {
             for client in self.clients.values_mut() {
                 client.request_recompute();
             }
