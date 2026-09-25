@@ -62,7 +62,7 @@ resume_agents_on_restore = false
 
 Herdr only resumes panes that reported a native session reference through a current official Herdr integration.
 
-Restored workspace, tab, pane, and native session references remain saved even when their processes have not started. After an active client exposes a tab, Herdr resumes only its visible panes (the focused pane when zoomed); hidden workspaces, unselected tabs, and zoom-hidden panes wait until they are shown. Multiple clients can expose different tabs at once. Directly attaching to a restored terminal also starts its pending session. A failed launch keeps its resume plan for another attempt.
+After a client attaches and provides terminal size and theme context, Herdr resumes eligible restored agent panes across workspaces and tabs without waiting for each pane to be focused.
 
 Native session restore requires these Herdr integration versions or newer:
 
